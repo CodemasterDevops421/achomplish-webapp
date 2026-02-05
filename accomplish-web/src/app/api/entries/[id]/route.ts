@@ -2,11 +2,11 @@ import { NextRequest } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { handleApiError, successResponse, errors } from "@/lib/api-utils";
 import { updateEntrySchema, updateEntryLegacySchema } from "@/lib/validations";
-import { getEntryById, updateEntry, softDeleteEntry } from "@/lib/db/queries";
+import { getEntryById, getEntryByDate, updateEntry, softDeleteEntry } from "@/lib/db/queries";
 
 type Params = Promise<{ id: string }>;
 
-// GET /api/entries/[id] - Get single entry
+// GET /api/entries/[id] - Get single entry by ID or date
 export async function GET(
     request: NextRequest,
     { params }: { params: Params }
@@ -16,7 +16,16 @@ export async function GET(
         if (!userId) throw errors.unauthorized();
 
         const { id } = await params;
-        const entry = await getEntryById(id, userId);
+        
+        // Check if the parameter is a date (YYYY-MM-DD format)
+        const isDateFormat = /^\d{4}-\d{2}-\d{2}$/.test(id);
+        
+        let entry;
+        if (isDateFormat) {
+            entry = await getEntryByDate(userId, id);
+        } else {
+            entry = await getEntryById(id, userId);
+        }
 
         if (!entry) {
             throw errors.notFound("Entry");
