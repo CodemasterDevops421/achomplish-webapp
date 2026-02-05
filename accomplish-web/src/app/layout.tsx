@@ -1,14 +1,20 @@
 import type { Metadata } from "next";
-import { Plus_Jakarta_Sans } from "next/font/google";
+import { Syne, Alegreya_Sans } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { PostHogProvider } from "@/lib/posthog";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
-const plusJakartaSans = Plus_Jakarta_Sans({
-  variable: "--font-plus-jakarta",
+const displayFont = Syne({
+  variable: "--font-display",
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
+  weight: ["400", "500", "600", "700", "800"],
+});
+
+const bodyFont = Alegreya_Sans({
+  variable: "--font-body",
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "700"],
 });
 
 export const metadata: Metadata = {
@@ -31,7 +37,7 @@ export default function RootLayout({
   return (
     <ClerkProvider>
       <html lang="en">
-      <body className={`${plusJakartaSans.variable} font-sans antialiased`}>
+      <body className={`${displayFont.variable} ${bodyFont.variable} font-sans antialiased`}>
         <PostHogProvider>
           {children}
         </PostHogProvider>
