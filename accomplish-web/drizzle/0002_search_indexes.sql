@@ -1,4 +1,11 @@
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
+-- NOTE: Drizzle runs migrations inside a transaction; CONCURRENTLY is not allowed there.
+-- Ensure pg_trgm is pre-provisioned if your managed Postgres restricts CREATE EXTENSION.
+DO $$ BEGIN
+    CREATE EXTENSION IF NOT EXISTS pg_trgm;
+EXCEPTION
+    WHEN insufficient_privilege THEN
+        RAISE NOTICE 'pg_trgm extension not installed; provision manually before running index creation.';
+END $$;
 
 CREATE INDEX IF NOT EXISTS "entries_raw_text_trgm_idx"
 ON "entries" USING GIN ("raw_text" gin_trgm_ops);

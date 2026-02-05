@@ -4,6 +4,7 @@ import { handleApiError, successResponse, errors } from "@/lib/api-utils";
 import { updateSettingsLegacySchema, updateSettingsSchema } from "@/lib/validations";
 import { db, userSettings } from "@/lib/db";
 import { eq } from "drizzle-orm";
+import { normalizeTimezone } from "@/lib/timezone";
 
 // GET /api/settings - Get user settings
 export async function GET(request: NextRequest) {
@@ -15,6 +16,7 @@ export async function GET(request: NextRequest) {
             request.headers.get("x-user-timezone") ||
             request.headers.get("x-vercel-ip-timezone") ||
             "UTC";
+        const safeTz = normalizeTimezone(requestedTz);
 
         const result = await db
             .select()
@@ -27,7 +29,7 @@ export async function GET(request: NextRequest) {
             return successResponse({
                 email_reminders_enabled: true,
                 reminder_time: "18:30",
-                reminder_timezone: requestedTz,
+                reminder_timezone: safeTz,
                 skip_weekends: true,
             });
         }
@@ -55,6 +57,7 @@ export async function PATCH(request: NextRequest) {
             request.headers.get("x-user-timezone") ||
             request.headers.get("x-vercel-ip-timezone") ||
             "UTC";
+        const safeTz = normalizeTimezone(requestedTz);
         const parsed = updateSettingsSchema.safeParse(body);
         let updates: {
             emailRemindersEnabled?: boolean;
@@ -84,17 +87,37 @@ export async function PATCH(request: NextRequest) {
             .where(eq(userSettings.userId, userId))
             .limit(1);
 
+        const updateSet = {
+            ...(updates.emailRemindersEnabled !== undefined
+                ? { emailRemindersEnabled: updates.emailRemindersEnabled }
+                : {}),
+            ...(updates.reminderTime !== undefined
+                ? { reminderTime: updates.reminderTime }
+                : {}),
+            ...(updates.reminderTimezone !== undefined
+                ? { reminderTimezone: normalizeTimezone(updates.reminderTimezone) }
+                : {}),
+            ...(updates.skipWeekends !== undefined
+                ? { skipWeekends: updates.skipWeekends }
+                : {}),
+            updatedAt: new Date(),
+        };
+
         let settings;
         if (existing.length === 0) {
-            // Create new settings
+            // Create new settings, but apply PATCH updates even if a concurrent insert happens.
             const created = await db
                 .insert(userSettings)
                 .values({
                     userId,
                     emailRemindersEnabled: updates.emailRemindersEnabled ?? true,
                     reminderTime: updates.reminderTime ?? "18:30",
-                    reminderTimezone: updates.reminderTimezone ?? requestedTz,
+                    reminderTimezone: normalizeTimezone(updates.reminderTimezone ?? safeTz),
                     skipWeekends: updates.skipWeekends ?? true,
+                })
+                .onConflictDoUpdate({
+                    target: userSettings.userId,
+                    set: updateSet,
                 })
                 .returning();
             settings = created[0];
@@ -102,21 +125,7 @@ export async function PATCH(request: NextRequest) {
             // Update existing settings
             const updated = await db
                 .update(userSettings)
-                .set({
-                    ...(updates.emailRemindersEnabled !== undefined
-                        ? { emailRemindersEnabled: updates.emailRemindersEnabled }
-                        : {}),
-                    ...(updates.reminderTime !== undefined
-                        ? { reminderTime: updates.reminderTime }
-                        : {}),
-                    ...(updates.reminderTimezone !== undefined
-                        ? { reminderTimezone: updates.reminderTimezone }
-                        : {}),
-                    ...(updates.skipWeekends !== undefined
-                        ? { skipWeekends: updates.skipWeekends }
-                        : {}),
-                    updatedAt: new Date(),
-                })
+                .set(updateSet)
                 .where(eq(userSettings.userId, userId))
                 .returning();
             settings = updated[0];

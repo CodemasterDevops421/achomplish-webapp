@@ -54,7 +54,7 @@ export default function SettingsPage() {
     useEffect(() => {
         const loadSettings = async () => {
             try {
-                const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
                 const res = await fetch("/api/settings", {
                     headers: {
                         "x-user-timezone": localTz,
@@ -94,11 +94,12 @@ export default function SettingsPage() {
     const handleSave = async () => {
         setIsSaving(true);
         try {
+            const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
             const res = await fetch("/api/settings", {
                 method: "PATCH",
                 headers: {
                     "Content-Type": "application/json",
-                    "x-user-timezone": Intl.DateTimeFormat().resolvedOptions().timeZone,
+                    "x-user-timezone": localTz,
                 },
                 body: JSON.stringify(settings),
             });
