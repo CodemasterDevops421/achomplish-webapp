@@ -8,6 +8,7 @@ import { toZonedTime } from "date-fns-tz";
 import { clerkClient } from "@clerk/nextjs/server";
 import { posthogCaptureServer } from "@/lib/posthog";
 import { captureServerError } from "@/lib/sentry/server";
+import { normalizeTimezone } from "@/lib/timezone";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -70,7 +71,8 @@ export async function POST(request: NextRequest) {
         const processUser = async (user: typeof usersWithReminders[number]) => {
             try {
                 // Convert current time to user's timezone
-                const userTime = toZonedTime(now, user.reminderTimezone || "UTC");
+                const safeTz = normalizeTimezone(user.reminderTimezone || "UTC");
+                const userTime = toZonedTime(now, safeTz);
                 const userHour = userTime.getHours();
                 const userMinute = userTime.getMinutes();
                 const todayLocal = format(userTime, "yyyy-MM-dd");
@@ -97,7 +99,7 @@ export async function POST(request: NextRequest) {
                 // Skip if already reminded today
                 if (user.lastReminderSentAt) {
                     const lastSentLocal = format(
-                        toZonedTime(user.lastReminderSentAt, user.reminderTimezone || "UTC"),
+                        toZonedTime(user.lastReminderSentAt, safeTz),
                         "yyyy-MM-dd"
                     );
                     if (lastSentLocal === todayLocal) {

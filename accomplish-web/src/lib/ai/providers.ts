@@ -78,6 +78,9 @@ Respond in JSON format only:
             if (text) {
                 return { provider: "anthropic", model, json: extractJsonFromText(text) };
             }
+            if (!openai) {
+                throw errors.badRequest("AI returned empty response");
+            }
         } catch (error) {
             if (!openai) throw error;
         }
@@ -118,6 +121,9 @@ export async function getGeneratedText(prompt: string): Promise<{
             const text = extractAnthropicText(response);
             if (text) {
                 return { provider: "anthropic", model, text };
+            }
+            if (!openai) {
+                throw errors.badRequest("AI returned empty response");
             }
         } catch (error) {
             if (!openai) throw error;

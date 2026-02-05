@@ -48,7 +48,7 @@ export default function DashboardPage() {
     const reminderParam = searchParams.get("reminder");
     const userTz =
         typeof window !== "undefined"
-            ? Intl.DateTimeFormat().resolvedOptions().timeZone
+            ? Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC"
             : "UTC";
 
     const today = new Date().toLocaleDateString("en-US", {
@@ -126,9 +126,15 @@ export default function DashboardPage() {
             method: "PATCH",
             headers: { "Content-Type": "application/json", "x-user-timezone": userTz },
             body: JSON.stringify({}),
-        }).finally(() => {
-            localStorage.setItem("accomplish-settings-initialized", "true");
-        });
+        })
+            .then((res) => {
+                if (res.ok) {
+                    localStorage.setItem("accomplish-settings-initialized", "true");
+                }
+            })
+            .catch((error) => {
+                console.error("Failed to initialize settings:", error);
+            });
     }, [userTz]);
 
     useEffect(() => {

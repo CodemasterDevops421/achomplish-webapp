@@ -5,6 +5,7 @@ import { createEntrySchema, createEntryLegacySchema, paginationSchema } from "@/
 import { getEntriesPaginated, getTodayDate, upsertEntry } from "@/lib/db/queries";
 import { db, userSettings } from "@/lib/db";
 import { eq } from "drizzle-orm";
+import { normalizeTimezone } from "@/lib/timezone";
 
 // GET /api/entries - List entries with pagination
 export async function GET(request: NextRequest) {
@@ -74,6 +75,7 @@ export async function POST(request: NextRequest) {
             request.headers.get("x-user-timezone") ||
             request.headers.get("x-vercel-ip-timezone") ||
             "UTC";
+        const safeTz = normalizeTimezone(requestedTz);
 
         const settings = await db
             .select()
@@ -89,13 +91,23 @@ export async function POST(request: NextRequest) {
                     userId,
                     emailRemindersEnabled: true,
                     reminderTime: "18:30",
-                    reminderTimezone: requestedTz,
+                    reminderTimezone: safeTz,
                     skipWeekends: true,
                 })
+                .onConflictDoNothing({ target: userSettings.userId })
                 .returning();
-            timezone = created[0].reminderTimezone;
+            if (created.length) {
+                timezone = created[0].reminderTimezone;
+            } else {
+                const existing = await db
+                    .select()
+                    .from(userSettings)
+                    .where(eq(userSettings.userId, userId))
+                    .limit(1);
+                timezone = existing[0]?.reminderTimezone;
+            }
         }
-        const today = getTodayDate(timezone);
+        const today = getTodayDate(normalizeTimezone(timezone));
         if (entryDate && entryDate !== today) {
             throw errors.badRequest("Entries can only be created or updated for today.");
         }

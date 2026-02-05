@@ -4,6 +4,7 @@ import { handleApiError, successResponse, errors } from "@/lib/api-utils";
 import { updateSettingsLegacySchema, updateSettingsSchema } from "@/lib/validations";
 import { db, userSettings } from "@/lib/db";
 import { eq } from "drizzle-orm";
+import { normalizeTimezone } from "@/lib/timezone";
 
 // GET /api/settings - Get user settings
 export async function GET(request: NextRequest) {
@@ -15,6 +16,7 @@ export async function GET(request: NextRequest) {
             request.headers.get("x-user-timezone") ||
             request.headers.get("x-vercel-ip-timezone") ||
             "UTC";
+        const safeTz = normalizeTimezone(requestedTz);
 
         const result = await db
             .select()
@@ -27,7 +29,7 @@ export async function GET(request: NextRequest) {
             return successResponse({
                 email_reminders_enabled: true,
                 reminder_time: "18:30",
-                reminder_timezone: requestedTz,
+                reminder_timezone: safeTz,
                 skip_weekends: true,
             });
         }
@@ -55,6 +57,7 @@ export async function PATCH(request: NextRequest) {
             request.headers.get("x-user-timezone") ||
             request.headers.get("x-vercel-ip-timezone") ||
             "UTC";
+        const safeTz = normalizeTimezone(requestedTz);
         const parsed = updateSettingsSchema.safeParse(body);
         let updates: {
             emailRemindersEnabled?: boolean;
@@ -93,11 +96,24 @@ export async function PATCH(request: NextRequest) {
                     userId,
                     emailRemindersEnabled: updates.emailRemindersEnabled ?? true,
                     reminderTime: updates.reminderTime ?? "18:30",
-                    reminderTimezone: updates.reminderTimezone ?? requestedTz,
+                    reminderTimezone: normalizeTimezone(updates.reminderTimezone ?? safeTz),
                     skipWeekends: updates.skipWeekends ?? true,
                 })
+                .onConflictDoNothing({ target: userSettings.userId })
                 .returning();
-            settings = created[0];
+            if (created.length) {
+                settings = created[0];
+            } else {
+                const existing = await db
+                    .select()
+                    .from(userSettings)
+                    .where(eq(userSettings.userId, userId))
+                    .limit(1);
+                if (!existing.length) {
+                    throw errors.internal("Failed to create user settings");
+                }
+                settings = existing[0];
+            }
         } else {
             // Update existing settings
             const updated = await db
