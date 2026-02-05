@@ -1,13 +1,23 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Save, Sparkles, Calendar, Check } from "lucide-react";
+import posthog from "posthog-js";
 
 type Enrichment = {
     aiTitle: string | null;
@@ -17,8 +27,8 @@ type Enrichment = {
 
 type EntryData = {
     id: string;
-    entryDate: string;
-    rawText: string;
+    entry_date: string;
+    raw_text: string;
     enrichment: Enrichment | null;
 };
 
@@ -31,6 +41,10 @@ export default function DashboardPage() {
     const [isEnhancing, setIsEnhancing] = useState(false);
     const [lastSaved, setLastSaved] = useState<Date | null>(null);
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+    const [showOnboarding, setShowOnboarding] = useState(false);
+    const searchParams = useSearchParams();
+    const entryDateParam = searchParams.get("date");
+    const reminderParam = searchParams.get("reminder");
 
     const today = new Date().toLocaleDateString("en-US", {
         weekday: "long",
@@ -43,15 +57,28 @@ export default function DashboardPage() {
     useEffect(() => {
         const loadTodayEntry = async () => {
             try {
-                const res = await fetch("/api/entries/today");
+                const res = await fetch(
+                    entryDateParam
+                        ? `/api/entries/${entryDateParam}`
+                        : "/api/entries/today"
+                );
                 if (!res.ok) throw new Error("Failed to load entry");
 
                 const data = await res.json();
-                if (data.exists && data.entry) {
-                    setEntry(data.entry.rawText);
-                    setEntryId(data.entry.id);
-                    setEnrichment(data.entry.enrichment);
-                    setLastSaved(new Date(data.entry.updatedAt));
+                const payload = data.entry || data;
+                if ((data.exists && data.entry) || payload?.id) {
+                    setEntry(payload.raw_text);
+                    setEntryId(payload.id);
+                    setEnrichment(
+                        payload.enrichment
+                            ? {
+                                aiTitle: payload.enrichment.ai_title,
+                                aiBullets: payload.enrichment.ai_bullets,
+                                aiCategory: payload.enrichment.ai_category,
+                            }
+                            : null
+                    );
+                    setLastSaved(new Date(payload.updated_at));
                 } else {
                     // Check for draft in localStorage
                     const draft = localStorage.getItem("accomplish-draft");
@@ -71,7 +98,29 @@ export default function DashboardPage() {
         };
 
         loadTodayEntry();
+    }, [entryDateParam]);
+
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        const onboarded = localStorage.getItem("accomplish-onboarded");
+        if (!onboarded) {
+            setShowOnboarding(true);
+        }
     }, []);
+
+    useEffect(() => {
+        if (reminderParam === "1") {
+            posthog.capture("reminder_clicked", {
+                source: "email",
+            });
+        }
+    }, [reminderParam]);
+
+    useEffect(() => {
+        posthog.capture("entries_viewed", {
+            scope: entryDateParam ? "date" : "today",
+        });
+    }, [entryDateParam]);
 
     // Auto-save draft to localStorage every 30s
     useEffect(() => {
@@ -99,13 +148,15 @@ export default function DashboardPage() {
             return;
         }
 
+        const isEdit = Boolean(entryId);
+
         setIsSaving(true);
 
         try {
             const res = await fetch("/api/entries", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ rawText: entry }),
+                body: JSON.stringify({ raw_text: entry }),
             });
 
             if (!res.ok) {
@@ -118,6 +169,9 @@ export default function DashboardPage() {
             localStorage.removeItem("accomplish-draft");
             setLastSaved(new Date());
             setHasUnsavedChanges(false);
+            posthog.capture(isEdit ? "entry_edited" : "entry_created", {
+                entry_date: data.entry_date,
+            });
             toast.success("Entry saved successfully!");
         } catch (error) {
             console.error("Save error:", error);
@@ -134,13 +188,16 @@ export default function DashboardPage() {
             return;
         }
 
+        posthog.capture("ai_enhance_clicked", {
+            entry_id: entryId,
+        });
         setIsEnhancing(true);
 
         try {
             const res = await fetch("/api/ai/enhance", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ entryId }),
+                body: JSON.stringify({ entry_id: entryId }),
             });
 
             if (!res.ok) {
@@ -150,13 +207,22 @@ export default function DashboardPage() {
 
             const data = await res.json();
             setEnrichment({
-                aiTitle: data.aiTitle,
-                aiBullets: data.aiBullets,
-                aiCategory: data.aiCategory,
+                aiTitle: data.ai_title,
+                aiBullets: data.ai_bullets,
+                aiCategory: data.ai_category,
+            });
+            posthog.capture("ai_enhance_succeeded", {
+                entry_id: entryId,
+            });
+            posthog.capture("ai_version_saved", {
+                entry_id: entryId,
             });
             toast.success("Entry enhanced with AI!");
         } catch (error) {
             console.error("Enhance error:", error);
+            posthog.capture("ai_enhance_failed", {
+                entry_id: entryId,
+            });
             toast.error(error instanceof Error ? error.message : "Failed to enhance entry.");
         } finally {
             setIsEnhancing(false);
@@ -191,6 +257,47 @@ export default function DashboardPage() {
 
     return (
         <div className="space-y-6">
+            <Dialog open={showOnboarding} onOpenChange={setShowOnboarding}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Welcome to Accomplish</DialogTitle>
+                        <DialogDescription>
+                            Capture what you did today in a single place. You can optionally enhance with
+                            AI after saving.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="rounded-lg bg-muted/50 p-4 text-sm text-muted-foreground">
+                        Example: "Shipped the onboarding flow, reduced activation time by 40%, and fixed
+                        3 payment bugs."
+                    </div>
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={() => {
+                                localStorage.setItem("accomplish-onboarded", "true");
+                                setShowOnboarding(false);
+                            }}
+                            className="cursor-pointer"
+                        >
+                            Skip for now
+                        </Button>
+                        <Button
+                            onClick={() => {
+                                setEntry(
+                                    "Shipped the onboarding flow, reduced activation time by 40%, and fixed 3 payment bugs."
+                                );
+                                setHasUnsavedChanges(true);
+                                localStorage.setItem("accomplish-onboarded", "true");
+                                setShowOnboarding(false);
+                            }}
+                            className="bg-[var(--cta)] hover:bg-[var(--cta)]/90 text-white cursor-pointer"
+                        >
+                            Use example entry
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             {/* Date Header */}
             <div className="flex items-center gap-3 text-muted-foreground">
                 <Calendar className="w-5 h-5" />
@@ -217,6 +324,7 @@ export default function DashboardPage() {
                         placeholder="Today I worked on..."
                         className="min-h-[150px] resize-y text-base leading-relaxed focus-ring"
                         maxLength={5000}
+                        rows={3}
                     />
 
                     {/* Character count */}
@@ -238,6 +346,7 @@ export default function DashboardPage() {
                             onClick={handleSave}
                             disabled={!entry.trim() || isSaving}
                             className="bg-[var(--cta)] hover:bg-[var(--cta)]/90 text-white cursor-pointer"
+                            title="Save entry (Ctrl/⌘ + Enter)"
                         >
                             {isSaving ? (
                                 <>
@@ -257,6 +366,7 @@ export default function DashboardPage() {
                             disabled={!entryId || isEnhancing || hasUnsavedChanges}
                             onClick={handleEnhance}
                             className="cursor-pointer"
+                            title="Enhance with AI after saving"
                         >
                             {isEnhancing ? (
                                 <>
@@ -285,36 +395,46 @@ export default function DashboardPage() {
 
             {/* AI Enhancement Preview */}
             {enrichment && (
-                <Card className="shadow-md border-primary/20 bg-primary/5">
-                    <CardHeader className="pb-3">
-                        <div className="flex items-center gap-2">
-                            <Sparkles className="w-5 h-5 text-primary" />
-                            <CardTitle className="text-lg">AI Enhancement</CardTitle>
-                            {enrichment.aiCategory && (
-                                <Badge variant="outline" className="ml-auto">
-                                    {enrichment.aiCategory}
-                                </Badge>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <Card className="shadow-md border-border">
+                        <CardHeader className="pb-3">
+                            <CardTitle className="text-lg">Original Entry</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <p className="text-foreground whitespace-pre-wrap">{entry}</p>
+                        </CardContent>
+                    </Card>
+                    <Card className="shadow-md border-primary/20 bg-primary/5">
+                        <CardHeader className="pb-3">
+                            <div className="flex items-center gap-2">
+                                <Sparkles className="w-5 h-5 text-primary" />
+                                <CardTitle className="text-lg">AI Enhancement</CardTitle>
+                                {enrichment.aiCategory && (
+                                    <Badge variant="outline" className="ml-auto">
+                                        {enrichment.aiCategory}
+                                    </Badge>
+                                )}
+                            </div>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                            {enrichment.aiTitle && (
+                                <h3 className="font-semibold text-foreground">
+                                    {enrichment.aiTitle}
+                                </h3>
                             )}
-                        </div>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                        {enrichment.aiTitle && (
-                            <h3 className="font-semibold text-foreground">
-                                {enrichment.aiTitle}
-                            </h3>
-                        )}
-                        {enrichment.aiBullets && (
-                            <ul className="space-y-2">
-                                {enrichment.aiBullets.map((bullet, i) => (
-                                    <li key={i} className="flex items-start gap-2 text-foreground">
-                                        <span className="text-primary mt-1">•</span>
-                                        <span>{bullet}</span>
-                                    </li>
-                                ))}
-                            </ul>
-                        )}
-                    </CardContent>
-                </Card>
+                            {enrichment.aiBullets && (
+                                <ul className="space-y-2">
+                                    {enrichment.aiBullets.map((bullet, i) => (
+                                        <li key={i} className="flex items-start gap-2 text-foreground">
+                                            <span className="text-primary mt-1">•</span>
+                                            <span>{bullet}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </CardContent>
+                    </Card>
+                </div>
             )}
         </div>
     );

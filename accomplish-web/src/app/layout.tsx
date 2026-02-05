@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
+import { PostHogProvider } from "@/lib/posthog";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
@@ -30,10 +31,12 @@ export default function RootLayout({
   return (
     <ClerkProvider>
       <html lang="en">
-        <body className={`${plusJakartaSans.variable} font-sans antialiased`}>
+      <body className={`${plusJakartaSans.variable} font-sans antialiased`}>
+        <PostHogProvider>
           {children}
-          <Toaster position="bottom-right" richColors />
-        </body>
+        </PostHogProvider>
+        <Toaster position="bottom-right" richColors />
+      </body>
       </html>
     </ClerkProvider>
   );

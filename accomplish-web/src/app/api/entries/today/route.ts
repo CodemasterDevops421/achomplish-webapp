@@ -1,6 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import { handleApiError, successResponse, errors } from "@/lib/api-utils";
 import { getEntryByDate, getTodayDate } from "@/lib/db/queries";
+import { db, userSettings } from "@/lib/db";
+import { eq } from "drizzle-orm";
 
 // GET /api/entries/today - Get today's entry
 export async function GET() {
@@ -8,7 +10,13 @@ export async function GET() {
         const { userId } = await auth();
         if (!userId) throw errors.unauthorized();
 
-        const today = getTodayDate();
+        const settings = await db
+            .select()
+            .from(userSettings)
+            .where(eq(userSettings.userId, userId))
+            .limit(1);
+        const timezone = settings[0]?.reminderTimezone || "UTC";
+        const today = getTodayDate(timezone);
         const entry = await getEntryByDate(userId, today);
 
         if (!entry) {
@@ -24,15 +32,15 @@ export async function GET() {
             date: today,
             entry: {
                 id: entry.id,
-                entryDate: entry.entryDate,
-                rawText: entry.rawText,
-                createdAt: entry.createdAt,
-                updatedAt: entry.updatedAt,
+                entry_date: entry.entryDate,
+                raw_text: entry.rawText,
+                created_at: entry.createdAt,
+                updated_at: entry.updatedAt,
                 enrichment: entry.enrichment
                     ? {
-                        aiTitle: entry.enrichment.aiTitle,
-                        aiBullets: entry.enrichment.aiBullets,
-                        aiCategory: entry.enrichment.aiCategory,
+                        ai_title: entry.enrichment.aiTitle,
+                        ai_bullets: entry.enrichment.aiBullets,
+                        ai_category: entry.enrichment.aiCategory,
                     }
                     : null,
             },

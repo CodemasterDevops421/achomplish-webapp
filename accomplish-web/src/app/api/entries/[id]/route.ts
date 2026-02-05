@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { handleApiError, successResponse, errors } from "@/lib/api-utils";
-import { updateEntrySchema } from "@/lib/validations";
+import { updateEntrySchema, updateEntryLegacySchema } from "@/lib/validations";
 import { getEntryById, updateEntry, softDeleteEntry } from "@/lib/db/queries";
 
 type Params = Promise<{ id: string }>;
@@ -24,15 +24,15 @@ export async function GET(
 
         return successResponse({
             id: entry.id,
-            entryDate: entry.entryDate,
-            rawText: entry.rawText,
-            createdAt: entry.createdAt,
-            updatedAt: entry.updatedAt,
+            entry_date: entry.entryDate,
+            raw_text: entry.rawText,
+            created_at: entry.createdAt,
+            updated_at: entry.updatedAt,
             enrichment: entry.enrichment
                 ? {
-                    aiTitle: entry.enrichment.aiTitle,
-                    aiBullets: entry.enrichment.aiBullets,
-                    aiCategory: entry.enrichment.aiCategory,
+                    ai_title: entry.enrichment.aiTitle,
+                    ai_bullets: entry.enrichment.aiBullets,
+                    ai_category: entry.enrichment.aiCategory,
                 }
                 : null,
         });
@@ -52,7 +52,13 @@ export async function PATCH(
 
         const { id } = await params;
         const body = await request.json();
-        const { rawText } = updateEntrySchema.parse(body);
+        const parsed = updateEntrySchema.safeParse(body);
+        const legacyParsed = parsed.success ? null : updateEntryLegacySchema.safeParse(body);
+        if (!parsed.success && !legacyParsed?.success) {
+            throw legacyParsed?.error ?? parsed.error;
+        }
+
+        const rawText = parsed.success ? parsed.data.raw_text : legacyParsed!.data.rawText;
 
         const entry = await updateEntry(id, userId, rawText);
 
@@ -62,9 +68,9 @@ export async function PATCH(
 
         return successResponse({
             id: entry.id,
-            entryDate: entry.entryDate,
-            rawText: entry.rawText,
-            updatedAt: entry.updatedAt,
+            entry_date: entry.entryDate,
+            raw_text: entry.rawText,
+            updated_at: entry.updatedAt,
         });
     } catch (error) {
         return handleApiError(error);

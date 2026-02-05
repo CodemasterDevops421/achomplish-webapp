@@ -1,12 +1,34 @@
-import { UserButton } from "@clerk/nextjs";
+"use client";
+
+import { UserButton, useAuth } from "@clerk/nextjs";
 import Link from "next/link";
-import { BookOpen, Settings, BarChart3 } from "lucide-react";
+import { useEffect } from "react";
+import { BookOpen, Settings, BarChart3, Sparkles, FileText } from "lucide-react";
+import posthog from "posthog-js";
+import { posthogCaptureServer } from "@/lib/posthog";
 
 export default function DashboardLayout({
     children,
 }: {
     children: React.ReactNode;
 }) {
+    const { userId, isSignedIn } = useAuth();
+
+    useEffect(() => {
+        if (isSignedIn && userId) {
+            // Identify user in PostHog
+            posthog.identify(userId);
+            
+            // Capture user_signed_up if this is their first session
+            // We use localStorage to track if we've already captured this
+            const hasCapturedSignUp = localStorage.getItem("accomplish-signup-captured");
+            if (!hasCapturedSignUp) {
+                posthog.capture("user_signed_up");
+                localStorage.setItem("accomplish-signup-captured", "true");
+            }
+        }
+    }, [isSignedIn, userId]);
+
     return (
         <div className="min-h-screen bg-background">
             {/* Navigation */}
@@ -30,6 +52,20 @@ export default function DashboardLayout({
                             >
                                 <BarChart3 className="w-4 h-4" />
                                 Entries
+                            </Link>
+                            <Link
+                                href="/review"
+                                className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                            >
+                                <Sparkles className="w-4 h-4" />
+                                Review
+                            </Link>
+                            <Link
+                                href="/resume"
+                                className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                            >
+                                <FileText className="w-4 h-4" />
+                                Resume
                             </Link>
                             <Link
                                 href="/settings"

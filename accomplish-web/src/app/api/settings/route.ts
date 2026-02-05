@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { handleApiError, successResponse, errors } from "@/lib/api-utils";
-import { updateSettingsSchema } from "@/lib/validations";
+import { updateSettingsLegacySchema, updateSettingsSchema } from "@/lib/validations";
 import { db, userSettings } from "@/lib/db";
 import { eq } from "drizzle-orm";
 
@@ -20,19 +20,19 @@ export async function GET() {
         if (result.length === 0) {
             // Return defaults if no settings exist
             return successResponse({
-                emailRemindersEnabled: true,
-                reminderTime: "18:30",
-                reminderTimezone: "UTC",
-                skipWeekends: true,
+                email_reminders_enabled: true,
+                reminder_time: "18:30",
+                reminder_timezone: "UTC",
+                skip_weekends: true,
             });
         }
 
         const settings = result[0];
         return successResponse({
-            emailRemindersEnabled: settings.emailRemindersEnabled,
-            reminderTime: settings.reminderTime,
-            reminderTimezone: settings.reminderTimezone,
-            skipWeekends: settings.skipWeekends,
+            email_reminders_enabled: settings.emailRemindersEnabled,
+            reminder_time: settings.reminderTime,
+            reminder_timezone: settings.reminderTimezone,
+            skip_weekends: settings.skipWeekends,
         });
     } catch (error) {
         return handleApiError(error);
@@ -46,7 +46,20 @@ export async function PATCH(request: NextRequest) {
         if (!userId) throw errors.unauthorized();
 
         const body = await request.json();
-        const updates = updateSettingsSchema.parse(body);
+        const parsed = updateSettingsSchema.safeParse(body);
+        const legacyParsed = parsed.success ? null : updateSettingsLegacySchema.safeParse(body);
+        if (!parsed.success && !legacyParsed?.success) {
+            throw legacyParsed?.error ?? parsed.error;
+        }
+
+        const updates = parsed.success
+            ? {
+                emailRemindersEnabled: parsed.data.email_reminders_enabled,
+                reminderTime: parsed.data.reminder_time,
+                reminderTimezone: parsed.data.reminder_timezone,
+                skipWeekends: parsed.data.skip_weekends,
+            }
+            : legacyParsed!.data;
 
         // Check if settings exist
         const existing = await db
@@ -74,7 +87,18 @@ export async function PATCH(request: NextRequest) {
             const updated = await db
                 .update(userSettings)
                 .set({
-                    ...updates,
+                    ...(updates.emailRemindersEnabled !== undefined
+                        ? { emailRemindersEnabled: updates.emailRemindersEnabled }
+                        : {}),
+                    ...(updates.reminderTime !== undefined
+                        ? { reminderTime: updates.reminderTime }
+                        : {}),
+                    ...(updates.reminderTimezone !== undefined
+                        ? { reminderTimezone: updates.reminderTimezone }
+                        : {}),
+                    ...(updates.skipWeekends !== undefined
+                        ? { skipWeekends: updates.skipWeekends }
+                        : {}),
                     updatedAt: new Date(),
                 })
                 .where(eq(userSettings.userId, userId))
@@ -83,11 +107,11 @@ export async function PATCH(request: NextRequest) {
         }
 
         return successResponse({
-            emailRemindersEnabled: settings.emailRemindersEnabled,
-            reminderTime: settings.reminderTime,
-            reminderTimezone: settings.reminderTimezone,
-            skipWeekends: settings.skipWeekends,
-            updatedAt: settings.updatedAt,
+            email_reminders_enabled: settings.emailRemindersEnabled,
+            reminder_time: settings.reminderTime,
+            reminder_timezone: settings.reminderTimezone,
+            skip_weekends: settings.skipWeekends,
+            updated_at: settings.updatedAt,
         });
     } catch (error) {
         return handleApiError(error);

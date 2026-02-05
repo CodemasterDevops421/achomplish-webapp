@@ -1,8 +1,10 @@
 import { NextRequest } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { handleApiError, successResponse, errors } from "@/lib/api-utils";
-import { createEntrySchema, paginationSchema } from "@/lib/validations";
-import { getEntriesPaginated, upsertEntry } from "@/lib/db/queries";
+import { createEntrySchema, createEntryLegacySchema, paginationSchema } from "@/lib/validations";
+import { getEntriesPaginated, getTodayDate, upsertEntry } from "@/lib/db/queries";
+import { db, userSettings } from "@/lib/db";
+import { eq } from "drizzle-orm";
 
 // GET /api/entries - List entries with pagination
 export async function GET(request: NextRequest) {
@@ -15,21 +17,22 @@ export async function GET(request: NextRequest) {
             page: searchParams.get("page") || 1,
             limit: searchParams.get("limit") || 20,
         });
+        const search = searchParams.get("q")?.trim() || undefined;
 
-        const result = await getEntriesPaginated(userId, page, limit);
+        const result = await getEntriesPaginated(userId, page, limit, search);
 
         return successResponse({
             entries: result.entries.map((entry) => ({
                 id: entry.id,
-                entryDate: entry.entryDate,
-                rawText: entry.rawText,
-                createdAt: entry.createdAt,
-                updatedAt: entry.updatedAt,
+                entry_date: entry.entryDate,
+                raw_text: entry.rawText,
+                created_at: entry.createdAt,
+                updated_at: entry.updatedAt,
                 enrichment: entry.enrichment
                     ? {
-                        aiTitle: entry.enrichment.aiTitle,
-                        aiBullets: entry.enrichment.aiBullets,
-                        aiCategory: entry.enrichment.aiCategory,
+                        ai_title: entry.enrichment.aiTitle,
+                        ai_bullets: entry.enrichment.aiBullets,
+                        ai_category: entry.enrichment.aiCategory,
                     }
                     : null,
             })),
@@ -52,17 +55,35 @@ export async function POST(request: NextRequest) {
         if (!userId) throw errors.unauthorized();
 
         const body = await request.json();
-        const { rawText, entryDate } = createEntrySchema.parse(body);
+        const parsed = createEntrySchema.safeParse(body);
+        const legacyParsed = parsed.success ? null : createEntryLegacySchema.safeParse(body);
+        if (!parsed.success && !legacyParsed?.success) {
+            throw parsed.success ? parsed.error : legacyParsed?.error;
+        }
 
-        const entry = await upsertEntry(userId, rawText, entryDate);
+        const rawText = parsed.success ? parsed.data.raw_text : legacyParsed!.data.rawText;
+        const entryDate = parsed.success ? parsed.data.entry_date : legacyParsed!.data.entryDate;
+
+        const settings = await db
+            .select()
+            .from(userSettings)
+            .where(eq(userSettings.userId, userId))
+            .limit(1);
+        const timezone = settings[0]?.reminderTimezone || "UTC";
+        const today = getTodayDate(timezone);
+        if (entryDate && entryDate !== today) {
+            throw errors.badRequest("Entries can only be created or updated for today.");
+        }
+
+        const entry = await upsertEntry(userId, rawText, entryDate || today);
 
         return successResponse(
             {
                 id: entry.id,
-                entryDate: entry.entryDate,
-                rawText: entry.rawText,
-                createdAt: entry.createdAt,
-                updatedAt: entry.updatedAt,
+                entry_date: entry.entryDate,
+                raw_text: entry.rawText,
+                created_at: entry.createdAt,
+                updated_at: entry.updatedAt,
             },
             entry.createdAt === entry.updatedAt ? 201 : 200
         );

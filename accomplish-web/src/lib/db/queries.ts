@@ -1,7 +1,8 @@
-import { db, entries, entryEnrichments } from "./index";
+import { db, entries, entryEnrichments, rateLimits } from "./index";
 import type { Entry, EntryEnrichment } from "./schema";
-import { eq, and, desc, isNull, sql } from "drizzle-orm";
+import { eq, and, desc, isNull, sql, lt } from "drizzle-orm";
 import { format } from "date-fns";
+import { toZonedTime } from "date-fns-tz";
 
 export type EntryWithEnrichment = Entry & {
     enrichment: EntryEnrichment | null;
@@ -14,8 +15,20 @@ type JoinResult = {
 };
 
 // Get today's date in YYYY-MM-DD format
-export function getTodayDate(): string {
-    return format(new Date(), "yyyy-MM-dd");
+export function getTodayDate(timezone: string = "UTC"): string {
+    const now = new Date();
+    const zoned = toZonedTime(now, timezone);
+    return format(zoned, "yyyy-MM-dd");
+}
+
+function latestEnrichmentJoin() {
+    return and(
+        eq(entries.id, entryEnrichments.entryId),
+        eq(
+            entryEnrichments.version,
+            sql<number>`(select max(version) from entry_enrichments where entry_id = ${entries.id})`
+        )
+    );
 }
 
 // Get entry for a specific user and date
@@ -26,7 +39,7 @@ export async function getEntryByDate(
     const result = await db
         .select()
         .from(entries)
-        .leftJoin(entryEnrichments, eq(entries.id, entryEnrichments.entryId))
+        .leftJoin(entryEnrichments, latestEnrichmentJoin())
         .where(
             and(
                 eq(entries.userId, userId),
@@ -49,16 +62,23 @@ export async function getEntryByDate(
 export async function getEntriesPaginated(
     userId: string,
     page: number,
-    limit: number
+    limit: number,
+    search?: string
 ): Promise<{ entries: EntryWithEnrichment[]; total: number; hasMore: boolean }> {
     const offset = (page - 1) * limit;
+
+    const baseFilter = and(eq(entries.userId, userId), isNull(entries.deletedAt));
+    const searchFilter = search
+        ? sql`(${entries.rawText} ILIKE ${`%${search}%`} OR ${entryEnrichments.aiTitle} ILIKE ${`%${search}%`})`
+        : undefined;
+    const whereClause = searchFilter ? and(baseFilter, searchFilter) : baseFilter;
 
     // Get entries with enrichments
     const result = await db
         .select()
         .from(entries)
-        .leftJoin(entryEnrichments, eq(entries.id, entryEnrichments.entryId))
-        .where(and(eq(entries.userId, userId), isNull(entries.deletedAt)))
+        .leftJoin(entryEnrichments, latestEnrichmentJoin())
+        .where(whereClause)
         .orderBy(desc(entries.entryDate))
         .limit(limit)
         .offset(offset);
@@ -67,7 +87,7 @@ export async function getEntriesPaginated(
     const countResult = await db
         .select({ count: sql<number>`count(*)` })
         .from(entries)
-        .where(and(eq(entries.userId, userId), isNull(entries.deletedAt)));
+        .where(whereClause);
 
     const total = Number(countResult[0]?.count ?? 0);
 
@@ -186,7 +206,7 @@ export async function getEntryById(
     const result = await db
         .select()
         .from(entries)
-        .leftJoin(entryEnrichments, eq(entries.id, entryEnrichments.entryId))
+        .leftJoin(entryEnrichments, latestEnrichmentJoin())
         .where(
             and(
                 eq(entries.id, entryId),
@@ -247,7 +267,7 @@ export async function getEntriesInRange(
     const result = await db
         .select()
         .from(entries)
-        .leftJoin(entryEnrichments, eq(entries.id, entryEnrichments.entryId))
+        .leftJoin(entryEnrichments, latestEnrichmentJoin())
         .where(
             and(
                 eq(entries.userId, userId),
@@ -262,4 +282,52 @@ export async function getEntriesInRange(
         ...row.entries,
         enrichment: row.entry_enrichments,
     }));
+}
+
+export async function checkRateLimit(
+    userId: string,
+    key: string,
+    maxRequests: number,
+    windowSeconds: number
+): Promise<{ allowed: boolean; remaining: number }> {
+    const now = new Date();
+    const windowStart = new Date(Math.floor(now.getTime() / (windowSeconds * 1000)) * windowSeconds * 1000);
+
+    const existing = await db
+        .select()
+        .from(rateLimits)
+        .where(
+            and(
+                eq(rateLimits.userId, userId),
+                eq(rateLimits.key, key),
+                eq(rateLimits.windowStart, windowStart)
+            )
+        )
+        .limit(1);
+
+    if (existing.length === 0) {
+        await db
+            .insert(rateLimits)
+            .values({ userId, key, windowStart, count: 1 });
+        return { allowed: true, remaining: maxRequests - 1 };
+    }
+
+    const current = existing[0];
+    if (current.count >= maxRequests) {
+        return { allowed: false, remaining: 0 };
+    }
+
+    await db
+        .update(rateLimits)
+        .set({ count: current.count + 1 })
+        .where(eq(rateLimits.id, current.id));
+
+    return { allowed: true, remaining: maxRequests - (current.count + 1) };
+}
+
+export async function cleanupRateLimits(olderThanSeconds: number) {
+    const cutoff = new Date(Date.now() - olderThanSeconds * 1000);
+    await db
+        .delete(rateLimits)
+        .where(lt(rateLimits.windowStart, cutoff));
 }

@@ -2,10 +2,10 @@ import { NextRequest } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import OpenAI from "openai";
 import { handleApiError, successResponse, errors } from "@/lib/api-utils";
-import { enhanceEntrySchema } from "@/lib/validations";
-import { getEntryById, saveEnrichment } from "@/lib/db/queries";
+import { aiEnhancementResponseSchema, enhanceEntryLegacySchema, enhanceEntrySchema } from "@/lib/validations";
+import { checkRateLimit, cleanupRateLimits, getEntryById, saveEnrichment } from "@/lib/db/queries";
 
-const AI_TIMEOUT = 30000; // 30 seconds
+const AI_TIMEOUT = Number(process.env.OPENAI_TIMEOUT_S || 10) * 1000;
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -19,7 +19,18 @@ export async function POST(request: NextRequest) {
         if (!userId) throw errors.unauthorized();
 
         const body = await request.json();
-        const { entryId } = enhanceEntrySchema.parse(body);
+        const parsed = enhanceEntrySchema.safeParse(body);
+        const legacyParsed = parsed.success ? null : enhanceEntryLegacySchema.safeParse(body);
+        if (!parsed.success && !legacyParsed?.success) {
+            throw legacyParsed?.error ?? parsed.error;
+        }
+
+        const entryId = parsed.success ? parsed.data.entry_id : legacyParsed!.data.entryId;
+
+        const rate = await checkRateLimit(userId, "ai_enhance", 10, 60);
+        if (!rate.allowed) {
+            throw errors.tooManyRequests();
+        }
 
         // Get the entry
         const entry = await getEntryById(entryId, userId);
@@ -34,13 +45,15 @@ export async function POST(request: NextRequest) {
 
         const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-        const response = await openai.chat.completions.create({
-            model,
-            max_tokens: 500,
-            messages: [
-                {
-                    role: "system",
-                    content: `You are a professional work accomplishment summarizer. Given a work log entry, create:
+        let response;
+        try {
+            response = await openai.chat.completions.create({
+                model,
+                max_tokens: 500,
+                messages: [
+                    {
+                        role: "system",
+                        content: `You are a professional work accomplishment summarizer. Given a work log entry, create:
 1. A concise title (max 60 chars)
 2. 2-3 bullet points highlighting key accomplishments with impact
 3. A category (one of: Development, Documentation, Leadership, Operations, Design, Research, Communication, Other)
@@ -51,14 +64,21 @@ Respond in JSON format only:
   "bullets": ["...", "..."],
   "category": "..."
 }`,
-                },
-                {
-                    role: "user",
-                    content: entry.rawText,
-                },
-            ],
-            response_format: { type: "json_object" },
-        });
+                    },
+                    {
+                        role: "user",
+                        content: entry.rawText,
+                    },
+                ],
+                response_format: { type: "json_object" },
+            });
+        } catch (aiError) {
+            await cleanupRateLimits(86400);
+            return Response.json(
+                { error: "AI enhancement timed out", code: "TIMEOUT", fallback: true },
+                { status: 504 }
+            );
+        }
 
         // Parse AI response
         const content = response.choices[0]?.message?.content;
@@ -66,11 +86,11 @@ Respond in JSON format only:
             throw errors.badRequest("AI returned empty response");
         }
 
-        const aiResult = JSON.parse(content) as {
-            title: string;
-            bullets: string[];
-            category: string;
-        };
+        const parsedResult = aiEnhancementResponseSchema.safeParse(JSON.parse(content));
+        if (!parsedResult.success) {
+            throw errors.badRequest("AI returned invalid response format");
+        }
+        const aiResult = parsedResult.data;
 
         // Save enrichment
         const enrichment = await saveEnrichment(entryId, {
@@ -83,14 +103,15 @@ Respond in JSON format only:
 
         return successResponse({
             id: enrichment.id,
-            entryId: enrichment.entryId,
-            aiProvider: enrichment.aiProvider,
-            aiModel: enrichment.aiModel,
-            aiTitle: enrichment.aiTitle,
-            aiBullets: enrichment.aiBullets,
-            aiCategory: enrichment.aiCategory,
+            entry_id: enrichment.entryId,
+            ai_provider: enrichment.aiProvider,
+            ai_model: enrichment.aiModel,
+            ai_title: enrichment.aiTitle,
+            ai_bullets: enrichment.aiBullets,
+            ai_category: enrichment.aiCategory,
         });
     } catch (error) {
+        await cleanupRateLimits(86400);
         return handleApiError(error);
     }
 }
