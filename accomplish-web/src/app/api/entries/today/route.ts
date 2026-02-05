@@ -1,3 +1,4 @@
+import { NextRequest } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { handleApiError, successResponse, errors } from "@/lib/api-utils";
 import { getEntryByDate, getTodayDate } from "@/lib/db/queries";
@@ -5,17 +6,36 @@ import { db, userSettings } from "@/lib/db";
 import { eq } from "drizzle-orm";
 
 // GET /api/entries/today - Get today's entry
-export async function GET() {
+export async function GET(request: NextRequest) {
     try {
         const { userId } = await auth();
         if (!userId) throw errors.unauthorized();
+
+        const requestedTz =
+            request.headers.get("x-user-timezone") ||
+            request.headers.get("x-vercel-ip-timezone") ||
+            "UTC";
 
         const settings = await db
             .select()
             .from(userSettings)
             .where(eq(userSettings.userId, userId))
             .limit(1);
-        const timezone = settings[0]?.reminderTimezone || "UTC";
+
+        let timezone = settings[0]?.reminderTimezone;
+        if (!timezone) {
+            const created = await db
+                .insert(userSettings)
+                .values({
+                    userId,
+                    emailRemindersEnabled: true,
+                    reminderTime: "18:30",
+                    reminderTimezone: requestedTz,
+                    skipWeekends: true,
+                })
+                .returning();
+            timezone = created[0].reminderTimezone;
+        }
         const today = getTodayDate(timezone);
         const entry = await getEntryByDate(userId, today);
 

@@ -7,8 +7,35 @@ import { format, isWeekend } from "date-fns";
 import { toZonedTime } from "date-fns-tz";
 import { clerkClient } from "@clerk/nextjs/server";
 import { posthogCaptureServer } from "@/lib/posthog";
+import { captureServerError } from "@/lib/sentry/server";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
+
+async function withRetry<T>(
+    fn: () => Promise<T>,
+    retries: number = 2,
+    delayMs: number = 200
+): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            lastError = error;
+            if (attempt === retries) break;
+            await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)));
+        }
+    }
+    throw lastError;
+}
+
+function logInfo(message: string, context?: Record<string, unknown>) {
+    console.log(JSON.stringify({ level: "info", message, ...context }));
+}
+
+function logError(message: string, context?: Record<string, unknown>) {
+    console.error(JSON.stringify({ level: "error", message, ...context }));
+}
 
 // POST /api/cron/reminders - Send reminder emails (called by Vercel Cron)
 export async function POST(request: NextRequest) {
@@ -23,10 +50,12 @@ export async function POST(request: NextRequest) {
 
         // Check if Resend is configured
         if (!process.env.RESEND_API_KEY) {
-            throw errors.badRequest("Email service not configured");
+            throw errors.internal("Email service not configured");
         }
 
         const now = new Date();
+        const clerk = await clerkClient();
+        const batchSize = Number(process.env.REMINDER_BATCH_SIZE || 20);
 
         // Get all users with email reminders enabled
         const usersWithReminders = await db
@@ -36,8 +65,9 @@ export async function POST(request: NextRequest) {
 
         let sentCount = 0;
         let skippedCount = 0;
+        let errorCount = 0;
 
-        for (const user of usersWithReminders) {
+        const processUser = async (user: typeof usersWithReminders[number]) => {
             try {
                 // Convert current time to user's timezone
                 const userTime = toZonedTime(now, user.reminderTimezone || "UTC");
@@ -56,14 +86,12 @@ export async function POST(request: NextRequest) {
                 const isReminderTime = Math.abs(nowMinutes - reminderMinutes) <= 30;
 
                 if (!isReminderTime) {
-                    skippedCount++;
-                    continue;
+                    return { sent: 0, skipped: 1, errors: 0 };
                 }
 
                 // Skip weekends if configured
                 if (user.skipWeekends && isWeekend(userTime)) {
-                    skippedCount++;
-                    continue;
+                    return { sent: 0, skipped: 1, errors: 0 };
                 }
 
                 // Skip if already reminded today
@@ -73,8 +101,7 @@ export async function POST(request: NextRequest) {
                         "yyyy-MM-dd"
                     );
                     if (lastSentLocal === todayLocal) {
-                        skippedCount++;
-                        continue;
+                        return { sent: 0, skipped: 1, errors: 0 };
                     }
                 }
 
@@ -92,26 +119,29 @@ export async function POST(request: NextRequest) {
                     .limit(1);
 
                 if (existingEntry.length > 0) {
-                    skippedCount++;
-                    continue;
+                    return { sent: 0, skipped: 1, errors: 0 };
                 }
 
-                const clerk = await clerkClient();
-                const clerkUser = await clerk.users.getUser(user.userId);
+                const clerkUser = await withRetry(
+                    () => clerk.users.getUser(user.userId),
+                    2,
+                    200
+                );
                 const userEmail = clerkUser.emailAddresses.find(
                     (email) => email.id === clerkUser.primaryEmailAddressId
                 )?.emailAddress;
 
                 if (!userEmail) {
-                    skippedCount++;
-                    continue;
+                    return { sent: 0, skipped: 1, errors: 0 };
                 }
 
-                await resend.emails.send({
-                    from: "Accomplish <reminders@accomplish.today>",
-                    to: userEmail,
-                    subject: "Don't forget to log your accomplishments today! 📝",
-                    html: `
+                await withRetry(
+                    () =>
+                        resend.emails.send({
+                            from: "Accomplish <reminders@accomplish.today>",
+                            to: userEmail,
+                            subject: "Don't forget to log your accomplishments today! 📝",
+                            html: `
                       <h2>Hey there!</h2>
                       <p>You haven't logged your accomplishments for today yet.</p>
                       <p>Taking 2 minutes now will save you hours during your next performance review.</p>
@@ -125,7 +155,10 @@ export async function POST(request: NextRequest) {
                         </small>
                       </p>
                     `,
-                });
+                        }),
+                    2,
+                    300
+                );
 
                 await db
                     .update(userSettings)
@@ -138,9 +171,22 @@ export async function POST(request: NextRequest) {
                     skip_weekends: user.skipWeekends,
                 });
 
-                sentCount++;
+                logInfo("Reminder sent", { user_id: user.userId, date: todayLocal });
+                return { sent: 1, skipped: 0, errors: 0 };
             } catch (userError) {
-                console.error(`Failed to process user ${user.userId}:`, userError);
+                logError("Reminder failed", { user_id: user.userId, error: String(userError) });
+                captureServerError(userError, { scope: "reminder_cron", userId: user.userId });
+                return { sent: 0, skipped: 0, errors: 1 };
+            }
+        };
+
+        for (let i = 0; i < usersWithReminders.length; i += batchSize) {
+            const batch = usersWithReminders.slice(i, i + batchSize);
+            const results = await Promise.all(batch.map(processUser));
+            for (const result of results) {
+                sentCount += result.sent;
+                skippedCount += result.skipped;
+                errorCount += result.errors;
             }
         }
 
@@ -149,6 +195,7 @@ export async function POST(request: NextRequest) {
             processed: usersWithReminders.length,
             sent: sentCount,
             skipped: skippedCount,
+            errors: errorCount,
             timestamp: now.toISOString(),
         });
     } catch (error) {

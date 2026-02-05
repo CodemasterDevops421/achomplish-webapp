@@ -1,14 +1,48 @@
-import OpenAI from "openai";
 import { errors, ApiError } from "@/lib/api-utils";
 import { checkRateLimit, cleanupRateLimits, getEntriesInRange } from "@/lib/db/queries";
 import { db, generatedOutputs } from "@/lib/db";
+import { getGeneratedText } from "@/lib/ai/providers";
 
-const AI_TIMEOUT = Number(process.env.OPENAI_TIMEOUT_S || 10) * 1000;
+function validateReviewOutput(content: string) {
+    const rawLines = content.split(/\r?\n/);
+    const lines = rawLines.map((line) => line.trim());
+    const summaryIndex = lines.findIndex((line) => /^##\s*summary$/i.test(line));
+    const accomplishmentsIndex = lines.findIndex((line) =>
+        /^##\s*key accomplishments$/i.test(line)
+    );
 
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-    timeout: AI_TIMEOUT,
-});
+    let summaryBlock = "";
+    if (summaryIndex !== -1 && accomplishmentsIndex !== -1 && accomplishmentsIndex > summaryIndex) {
+        summaryBlock = lines.slice(summaryIndex + 1, accomplishmentsIndex).join("\n");
+    } else {
+        // Fallback: use everything before the first bullet list as summary
+        const firstBullet = lines.findIndex((line) => line.startsWith("- "));
+        summaryBlock = firstBullet === -1 ? lines.join("\n") : lines.slice(0, firstBullet).join("\n");
+    }
+
+    const paragraphs = summaryBlock
+        .split(/\n\s*\n/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+
+    const bulletCount = lines.filter((line) => line.startsWith("- ")).length;
+
+    if (paragraphs.length < 3 || paragraphs.length > 5) {
+        throw errors.badRequest("AI returned invalid summary length");
+    }
+    if (bulletCount < 6 || bulletCount > 10) {
+        throw errors.badRequest("AI returned invalid accomplishments bullet count");
+    }
+}
+
+function validateResumeOutput(content: string) {
+    const bulletCount = content
+        .split(/\r?\n/)
+        .filter((line) => line.trim().startsWith("- ")).length;
+    if (bulletCount < 8 || bulletCount > 12) {
+        throw errors.badRequest("AI returned invalid resume bullet count");
+    }
+}
 
 function buildGroupedSummary(summaries: Array<Record<string, unknown>>): string {
     const grouped: Record<string, Array<Record<string, unknown>>> = {};
@@ -52,10 +86,6 @@ export async function generateOutput(
         });
     }
 
-    if (!process.env.OPENAI_API_KEY) {
-        throw errors.badRequest("AI service not configured. Please add OPENAI_API_KEY.");
-    }
-
     const summaries = entries.map((entry) => {
         if (entry.enrichment?.aiTitle && entry.enrichment?.aiBullets) {
             return {
@@ -72,9 +102,6 @@ export async function generateOutput(
     });
 
     const groupedSummary = buildGroupedSummary(summaries);
-    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-    const maxTokens = Number(process.env.OPENAI_MAX_OUTPUT_TOKENS || 2000);
-
     const prompt =
         type === "review"
             ? `You are a professional career coach. Based on the following grouped accomplishments, write a comprehensive performance review that:
@@ -106,19 +133,24 @@ Output only the bullet points, one per line, starting with "-".`;
 
     let response;
     try {
-        response = await openai.chat.completions.create({
-            model,
-            max_tokens: maxTokens,
-            messages: [{ role: "user", content: prompt }],
-        });
+        response = await getGeneratedText(prompt);
     } catch (aiError) {
         await cleanupRateLimits(86400);
+        if (aiError instanceof ApiError) {
+            throw aiError;
+        }
         throw errors.timeout("AI generation");
     }
 
-    const content = response.choices[0]?.message?.content;
+    const content = response.text;
     if (!content) {
         throw errors.badRequest("AI returned empty response");
+    }
+
+    if (type === "review") {
+        validateReviewOutput(content);
+    } else {
+        validateResumeOutput(content);
     }
 
     const saved = await db

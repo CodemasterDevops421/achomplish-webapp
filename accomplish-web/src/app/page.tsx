@@ -85,8 +85,8 @@ export default function LandingPage() {
             </h3>
             <div className="bg-muted/50 rounded-xl p-4 border border-border">
               <p className="text-muted-foreground italic">
-                "Shipped the new onboarding flow, reducing time-to-activation by 40%.
-                Fixed 3 critical bugs in the payment system. Led sprint planning for Q1..."
+                &quot;Shipped the new onboarding flow, reducing time-to-activation by 40%.
+                Fixed 3 critical bugs in the payment system. Led sprint planning for Q1...&quot;
               </p>
             </div>
             <div className="mt-4 flex justify-end">

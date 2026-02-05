@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { AlertTriangle, RefreshCw, Home } from "lucide-react";
 import Link from "next/link";
+import { Sentry, initSentryClient } from "@/lib/sentry/client";
 
 export default function GlobalError({
     error,
@@ -16,6 +17,8 @@ export default function GlobalError({
     useEffect(() => {
         // Log the error to an error reporting service
         console.error("Global error:", error);
+        initSentryClient();
+        Sentry.captureException(error);
     }, [error]);
 
     return (
@@ -28,7 +31,7 @@ export default function GlobalError({
                             Something went wrong
                         </h1>
                         <p className="text-[#5F9EA0] mb-6">
-                            We encountered an unexpected error. Don't worry, your data is safe.
+                            We encountered an unexpected error. Don&apos;t worry, your data is safe.
                         </p>
 
                         {process.env.NODE_ENV === "development" && (

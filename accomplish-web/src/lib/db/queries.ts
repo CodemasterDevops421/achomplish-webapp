@@ -294,36 +294,18 @@ export async function checkRateLimit(
     const now = new Date();
     const windowStart = new Date(Math.floor(now.getTime() / (windowSeconds * 1000)) * windowSeconds * 1000);
 
-    const existing = await db
-        .select()
-        .from(rateLimits)
-        .where(
-            and(
-                eq(rateLimits.userId, userId),
-                eq(rateLimits.key, key),
-                eq(rateLimits.windowStart, windowStart)
-            )
-        )
-        .limit(1);
+    const updated = await db
+        .insert(rateLimits)
+        .values({ userId, key, windowStart, count: 1 })
+        .onConflictDoUpdate({
+            target: [rateLimits.userId, rateLimits.key, rateLimits.windowStart],
+            set: { count: sql`${rateLimits.count} + 1` },
+        })
+        .returning({ count: rateLimits.count });
 
-    if (existing.length === 0) {
-        await db
-            .insert(rateLimits)
-            .values({ userId, key, windowStart, count: 1 });
-        return { allowed: true, remaining: maxRequests - 1 };
-    }
-
-    const current = existing[0];
-    if (current.count >= maxRequests) {
-        return { allowed: false, remaining: 0 };
-    }
-
-    await db
-        .update(rateLimits)
-        .set({ count: current.count + 1 })
-        .where(eq(rateLimits.id, current.id));
-
-    return { allowed: true, remaining: maxRequests - (current.count + 1) };
+    const currentCount = updated[0]?.count ?? 0;
+    const remaining = Math.max(0, maxRequests - currentCount);
+    return { allowed: currentCount <= maxRequests, remaining };
 }
 
 export async function cleanupRateLimits(olderThanSeconds: number) {

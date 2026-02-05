@@ -46,6 +46,10 @@ export default function DashboardPage() {
     const searchParams = useSearchParams();
     const entryDateParam = searchParams.get("date");
     const reminderParam = searchParams.get("reminder");
+    const userTz =
+        typeof window !== "undefined"
+            ? Intl.DateTimeFormat().resolvedOptions().timeZone
+            : "UTC";
 
     const today = new Date().toLocaleDateString("en-US", {
         weekday: "long",
@@ -61,7 +65,12 @@ export default function DashboardPage() {
                 const res = await fetch(
                     entryDateParam
                         ? `/api/entries/${entryDateParam}`
-                        : "/api/entries/today"
+                        : "/api/entries/today",
+                    {
+                        headers: {
+                            "x-user-timezone": userTz,
+                        },
+                    }
                 );
                 if (!res.ok) throw new Error("Failed to load entry");
 
@@ -99,7 +108,7 @@ export default function DashboardPage() {
         };
 
         loadTodayEntry();
-    }, [entryDateParam]);
+    }, [entryDateParam, userTz]);
 
     useEffect(() => {
         if (typeof window === "undefined") return;
@@ -108,6 +117,19 @@ export default function DashboardPage() {
             setShowOnboarding(true);
         }
     }, []);
+
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        const initialized = localStorage.getItem("accomplish-settings-initialized");
+        if (initialized) return;
+        fetch("/api/settings", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", "x-user-timezone": userTz },
+            body: JSON.stringify({}),
+        }).finally(() => {
+            localStorage.setItem("accomplish-settings-initialized", "true");
+        });
+    }, [userTz]);
 
     useEffect(() => {
         if (reminderParam === "1") {
@@ -156,7 +178,7 @@ export default function DashboardPage() {
         try {
             const res = await fetch(isEdit ? `/api/entries/${entryId}` : "/api/entries", {
                 method: isEdit ? "PATCH" : "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", "x-user-timezone": userTz },
                 body: JSON.stringify({ raw_text: entry }),
             });
 
@@ -180,7 +202,7 @@ export default function DashboardPage() {
         } finally {
             setIsSaving(false);
         }
-    }, [entry]);
+    }, [entry, entryId, userTz]);
 
     // Enhance with AI
     const handleEnhance = async () => {
@@ -197,7 +219,7 @@ export default function DashboardPage() {
         try {
             const res = await fetch("/api/ai/enhance", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", "x-user-timezone": userTz },
                 body: JSON.stringify({ entry_id: entryId }),
             });
 
@@ -268,10 +290,13 @@ export default function DashboardPage() {
                         </DialogDescription>
                     </DialogHeader>
                     <div className="rounded-lg bg-muted/50 p-4 text-sm text-muted-foreground">
-                        Example: "Shipped the onboarding flow, reduced activation time by 40%, and fixed
-                        3 payment bugs."
+                        Example: &quot;Shipped the onboarding flow, reduced activation time by 40%, and fixed
+                        3 payment bugs.&quot;
                     </div>
-                    <div className="text-xs text-muted-foreground">
+                    <div
+                        className="text-xs text-muted-foreground"
+                        title="Press Ctrl/⌘ + Enter to save quickly. AI is optional and runs only after you save."
+                    >
                         Tip: Press Ctrl/⌘ + Enter to save quickly. AI is optional and runs only after you save.
                     </div>
                     <DialogFooter>

@@ -54,11 +54,15 @@ export default function SettingsPage() {
     useEffect(() => {
         const loadSettings = async () => {
             try {
-                const res = await fetch("/api/settings");
+                const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                const res = await fetch("/api/settings", {
+                    headers: {
+                        "x-user-timezone": localTz,
+                    },
+                });
                 if (!res.ok) throw new Error("Failed to load settings");
 
                 const data = await res.json();
-                const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
                 const resolved = {
                     ...data,
                     reminder_timezone: data.reminder_timezone || localTz || "UTC",
@@ -92,7 +96,10 @@ export default function SettingsPage() {
         try {
             const res = await fetch("/api/settings", {
                 method: "PATCH",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-user-timezone": Intl.DateTimeFormat().resolvedOptions().timeZone,
+                },
                 body: JSON.stringify(settings),
             });
 
@@ -171,7 +178,7 @@ export default function SettingsPage() {
                         <div>
                             <p className="font-medium text-foreground">Daily Reminders</p>
                             <p className="text-sm text-muted-foreground">
-                                Receive an email if you haven't logged today
+                                Receive an email if you haven&apos;t logged today
                             </p>
                         </div>
                         <Button
@@ -249,7 +256,7 @@ export default function SettingsPage() {
                         <div>
                             <p className="font-medium text-foreground">Skip Weekends</p>
                             <p className="text-sm text-muted-foreground">
-                                Don't send reminders on Saturday and Sunday
+                                Don&apos;t send reminders on Saturday and Sunday
                             </p>
                         </div>
                         <Button

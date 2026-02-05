@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { handleApiError, successResponse, errors } from "@/lib/api-utils";
+import { handleApiError, successResponse, errors, ApiError } from "@/lib/api-utils";
 import { updateEntrySchema, updateEntryLegacySchema } from "@/lib/validations";
 import { getEntryById, getEntryByDate, updateEntry, softDeleteEntry } from "@/lib/db/queries";
 
@@ -28,6 +28,9 @@ export async function GET(
         }
 
         if (!entry) {
+            if (isDateFormat) {
+                throw new ApiError(404, "NOT_FOUND", "No entry found for this date");
+            }
             throw errors.notFound("Entry");
         }
 
@@ -61,15 +64,16 @@ export async function PATCH(
 
         const { id } = await params;
         const body = await request.json();
+        let rawText: string;
         const parsed = updateEntrySchema.safeParse(body);
         if (parsed.success) {
-            var rawText = parsed.data.raw_text;
+            rawText = parsed.data.raw_text;
         } else {
             const legacyParsed = updateEntryLegacySchema.safeParse(body);
             if (!legacyParsed.success) {
                 throw legacyParsed.error;
             }
-            var rawText = legacyParsed.data.rawText;
+            rawText = legacyParsed.data.rawText;
         }
 
         const entry = await updateEntry(id, userId, rawText);

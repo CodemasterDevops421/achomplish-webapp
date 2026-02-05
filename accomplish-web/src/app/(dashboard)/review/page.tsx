@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { FileText, Copy, Download, Calendar, Clock, ArrowLeft, Sparkles, FileDown } from "lucide-react";
 import posthog from "posthog-js";
@@ -21,7 +20,6 @@ export default function ReviewPage() {
   const [customEnd, setCustomEnd] = useState("");
   const [output, setOutput] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedId, setGeneratedId] = useState<string | null>(null);
 
   useEffect(() => {
     posthog.capture("generator_started", { type: "review" });
@@ -74,7 +72,6 @@ export default function ReviewPage() {
 
       const data = await res.json();
       setOutput(data.output_markdown);
-      setGeneratedId(data.id);
       posthog.capture("generator_succeeded", { type: "review", entry_count: data.entry_count });
       toast.success("Performance review generated!");
     } catch (error) {
