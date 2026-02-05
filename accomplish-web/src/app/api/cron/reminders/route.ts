@@ -96,7 +96,8 @@ export async function POST(request: NextRequest) {
                     continue;
                 }
 
-                const clerkUser = await clerkClient.users.getUser(user.userId);
+                const clerk = await clerkClient();
+                const clerkUser = await clerk.users.getUser(user.userId);
                 const userEmail = clerkUser.emailAddresses.find(
                     (email) => email.id === clerkUser.primaryEmailAddressId
                 )?.emailAddress;

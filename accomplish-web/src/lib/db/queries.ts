@@ -85,8 +85,9 @@ export async function getEntriesPaginated(
 
     // Get total count
     const countResult = await db
-        .select({ count: sql<number>`count(*)` })
+        .select({ count: sql<number>`count(distinct ${entries.id})` })
         .from(entries)
+        .leftJoin(entryEnrichments, latestEnrichmentJoin())
         .where(whereClause);
 
     const total = Number(countResult[0]?.count ?? 0);

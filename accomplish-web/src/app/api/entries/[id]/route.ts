@@ -62,12 +62,15 @@ export async function PATCH(
         const { id } = await params;
         const body = await request.json();
         const parsed = updateEntrySchema.safeParse(body);
-        const legacyParsed = parsed.success ? null : updateEntryLegacySchema.safeParse(body);
-        if (!parsed.success && !legacyParsed?.success) {
-            throw legacyParsed?.error ?? parsed.error;
+        if (parsed.success) {
+            var rawText = parsed.data.raw_text;
+        } else {
+            const legacyParsed = updateEntryLegacySchema.safeParse(body);
+            if (!legacyParsed.success) {
+                throw legacyParsed.error;
+            }
+            var rawText = legacyParsed.data.rawText;
         }
-
-        const rawText = parsed.success ? parsed.data.raw_text : legacyParsed!.data.rawText;
 
         const entry = await updateEntry(id, userId, rawText);
 

@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useEffect } from "react";
 import { BookOpen, Settings, BarChart3, Sparkles, FileText } from "lucide-react";
 import posthog from "posthog-js";
-import { posthogCaptureServer } from "@/lib/posthog";
 
 export default function DashboardLayout({
     children,

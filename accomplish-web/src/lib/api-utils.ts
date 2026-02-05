@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
+import { captureServerError } from "@/lib/sentry/server";
 
 export class ApiError extends Error {
     constructor(
@@ -15,6 +16,7 @@ export class ApiError extends Error {
 
 export function handleApiError(error: unknown): NextResponse {
     console.error("API Error:", error);
+    captureServerError(error);
 
     // Zod validation error
     if (error instanceof ZodError) {

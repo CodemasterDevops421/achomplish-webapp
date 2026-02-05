@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { FileText, Copy, Download, Calendar, Clock, ArrowLeft, Sparkles } from "lucide-react";
+import { FileText, Copy, Download, Calendar, Clock, ArrowLeft, Sparkles, FileDown } from "lucide-react";
 import posthog from "posthog-js";
 import { format, subMonths } from "date-fns";
 
@@ -107,6 +107,39 @@ export default function ReviewPage() {
       URL.revokeObjectURL(url);
       posthog.capture("generator_output_downloaded", { type: "review" });
       toast.success("Downloaded!");
+    }
+  };
+
+  const handleDownloadDocx = async () => {
+    if (!output) return;
+    try {
+      const res = await fetch("/api/export/docx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: output,
+          filename: `performance-review-${format(new Date(), "yyyy-MM-dd")}.docx`,
+        }),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to export docx");
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `performance-review-${format(new Date(), "yyyy-MM-dd")}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      posthog.capture("generator_output_downloaded", { type: "review", format: "docx" });
+      toast.success("Downloaded .docx!");
+    } catch (error) {
+      console.error("Docx export error:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to export .docx");
     }
   };
 
@@ -266,6 +299,10 @@ export default function ReviewPage() {
                 <Button variant="outline" size="sm" onClick={handleDownload} className="cursor-pointer">
                   <Download className="w-4 h-4 mr-2" />
                   Download .md
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleDownloadDocx} className="cursor-pointer">
+                  <FileDown className="w-4 h-4 mr-2" />
+                  Download .docx
                 </Button>
               </div>
             </div>

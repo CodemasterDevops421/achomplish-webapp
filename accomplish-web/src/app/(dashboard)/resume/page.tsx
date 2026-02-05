@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { FileText, Copy, Download, Calendar, Clock, ArrowLeft, Sparkles } from "lucide-react";
+import { FileText, Copy, Download, Calendar, Clock, ArrowLeft, Sparkles, FileDown } from "lucide-react";
 import posthog from "posthog-js";
 import { format, subMonths } from "date-fns";
 
@@ -104,6 +104,55 @@ export default function ResumePage() {
       URL.revokeObjectURL(url);
       posthog.capture("generator_output_downloaded", { type: "resume" });
       toast.success("Downloaded!");
+    }
+  };
+
+  const handleDownloadTxt = () => {
+    if (output) {
+      const blob = new Blob([output], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `resume-bullets-${format(new Date(), "yyyy-MM-dd")}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      posthog.capture("generator_output_downloaded", { type: "resume", format: "txt" });
+      toast.success("Downloaded .txt!");
+    }
+  };
+
+  const handleDownloadDocx = async () => {
+    if (!output) return;
+    try {
+      const res = await fetch("/api/export/docx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: output,
+          filename: `resume-bullets-${format(new Date(), "yyyy-MM-dd")}.docx`,
+        }),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to export docx");
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `resume-bullets-${format(new Date(), "yyyy-MM-dd")}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      posthog.capture("generator_output_downloaded", { type: "resume", format: "docx" });
+      toast.success("Downloaded .docx!");
+    } catch (error) {
+      console.error("Docx export error:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to export .docx");
     }
   };
 
@@ -263,6 +312,14 @@ export default function ResumePage() {
                 <Button variant="outline" size="sm" onClick={handleDownload} className="cursor-pointer">
                   <Download className="w-4 h-4 mr-2" />
                   Download .md
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleDownloadTxt} className="cursor-pointer">
+                  <FileText className="w-4 h-4 mr-2" />
+                  Download .txt
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleDownloadDocx} className="cursor-pointer">
+                  <FileDown className="w-4 h-4 mr-2" />
+                  Download .docx
                 </Button>
               </div>
             </div>

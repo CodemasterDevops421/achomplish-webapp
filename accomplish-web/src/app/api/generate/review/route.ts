@@ -12,13 +12,17 @@ export async function POST(request: NextRequest) {
 
         const body = await request.json();
         const parsed = generateOutputSchema.safeParse(body);
-        const legacyParsed = parsed.success ? null : generateOutputLegacySchema.safeParse(body);
-        if (!parsed.success && !legacyParsed?.success) {
-            throw legacyParsed?.error ?? parsed.error;
+        if (parsed.success) {
+            var rangeStart = parsed.data.range_start;
+            var rangeEnd = parsed.data.range_end;
+        } else {
+            const legacyParsed = generateOutputLegacySchema.safeParse(body);
+            if (!legacyParsed.success) {
+                throw legacyParsed.error;
+            }
+            var rangeStart = legacyParsed.data.rangeStart;
+            var rangeEnd = legacyParsed.data.rangeEnd;
         }
-
-        const rangeStart = parsed.success ? parsed.data.range_start : legacyParsed!.data.rangeStart;
-        const rangeEnd = parsed.success ? parsed.data.range_end : legacyParsed!.data.rangeEnd;
 
         const result = await generateOutput(userId, "review", rangeStart, rangeEnd);
 

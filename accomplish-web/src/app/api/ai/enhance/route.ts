@@ -20,12 +20,15 @@ export async function POST(request: NextRequest) {
 
         const body = await request.json();
         const parsed = enhanceEntrySchema.safeParse(body);
-        const legacyParsed = parsed.success ? null : enhanceEntryLegacySchema.safeParse(body);
-        if (!parsed.success && !legacyParsed?.success) {
-            throw legacyParsed?.error ?? parsed.error;
+        if (parsed.success) {
+            var entryId = parsed.data.entry_id;
+        } else {
+            const legacyParsed = enhanceEntryLegacySchema.safeParse(body);
+            if (!legacyParsed.success) {
+                throw legacyParsed.error;
+            }
+            var entryId = legacyParsed.data.entryId;
         }
-
-        const entryId = parsed.success ? parsed.data.entry_id : legacyParsed!.data.entryId;
 
         const rate = await checkRateLimit(userId, "ai_enhance", 10, 60);
         if (!rate.allowed) {

@@ -47,19 +47,26 @@ export async function PATCH(request: NextRequest) {
 
         const body = await request.json();
         const parsed = updateSettingsSchema.safeParse(body);
-        const legacyParsed = parsed.success ? null : updateSettingsLegacySchema.safeParse(body);
-        if (!parsed.success && !legacyParsed?.success) {
-            throw legacyParsed?.error ?? parsed.error;
-        }
-
-        const updates = parsed.success
-            ? {
+        let updates: {
+            emailRemindersEnabled?: boolean;
+            reminderTime?: string;
+            reminderTimezone?: string;
+            skipWeekends?: boolean;
+        };
+        if (parsed.success) {
+            updates = {
                 emailRemindersEnabled: parsed.data.email_reminders_enabled,
                 reminderTime: parsed.data.reminder_time,
                 reminderTimezone: parsed.data.reminder_timezone,
                 skipWeekends: parsed.data.skip_weekends,
+            };
+        } else {
+            const legacyParsed = updateSettingsLegacySchema.safeParse(body);
+            if (!legacyParsed.success) {
+                throw legacyParsed.error;
             }
-            : legacyParsed!.data;
+            updates = legacyParsed.data;
+        }
 
         // Check if settings exist
         const existing = await db

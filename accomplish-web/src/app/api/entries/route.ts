@@ -56,13 +56,17 @@ export async function POST(request: NextRequest) {
 
         const body = await request.json();
         const parsed = createEntrySchema.safeParse(body);
-        const legacyParsed = parsed.success ? null : createEntryLegacySchema.safeParse(body);
-        if (!parsed.success && !legacyParsed?.success) {
-            throw parsed.success ? parsed.error : legacyParsed?.error;
+        if (parsed.success) {
+            var rawText = parsed.data.raw_text;
+            var entryDate = parsed.data.entry_date;
+        } else {
+            const legacyParsed = createEntryLegacySchema.safeParse(body);
+            if (!legacyParsed.success) {
+                throw legacyParsed.error;
+            }
+            var rawText = legacyParsed.data.rawText;
+            var entryDate = legacyParsed.data.entryDate;
         }
-
-        const rawText = parsed.success ? parsed.data.raw_text : legacyParsed!.data.rawText;
-        const entryDate = parsed.success ? parsed.data.entry_date : legacyParsed!.data.entryDate;
 
         const settings = await db
             .select()
