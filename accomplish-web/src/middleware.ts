@@ -72,7 +72,7 @@ export default clerkMiddleware(async (auth, request) => {
     response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     response.headers.set(
         'Content-Security-Policy',
-        "default-src 'self'; script-src 'self' 'unsafe-inline' https://*.clerk.accounts.dev https://js.posthog.com https://app.posthog.com; style-src 'self' 'unsafe-inline' https://*.clerk.accounts.dev; img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self' https:; frame-ancestors 'none';"
+        "default-src 'self'; script-src 'self' 'unsafe-inline' https://*.clerk.accounts.dev https://js.posthog.com https://app.posthog.com https://hcaptcha.com https://*.hcaptcha.com; style-src 'self' 'unsafe-inline' https://*.clerk.accounts.dev; img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self' https: https://hcaptcha.com https://*.hcaptcha.com; frame-src https://hcaptcha.com https://*.hcaptcha.com; frame-ancestors 'none';"
     );
 
     return response;
