@@ -1,12 +1,12 @@
 import { NextRequest } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { handleApiError, successResponse, errors } from "@/lib/api-utils";
-import { updateEntrySchema } from "@/lib/validations";
-import { getEntryById, updateEntry, softDeleteEntry } from "@/lib/db/queries";
+import { updateEntrySchema, updateEntryLegacySchema } from "@/lib/validations";
+import { getEntryById, getEntryByDate, updateEntry, softDeleteEntry } from "@/lib/db/queries";
 
 type Params = Promise<{ id: string }>;
 
-// GET /api/entries/[id] - Get single entry
+// GET /api/entries/[id] - Get single entry by ID or date
 export async function GET(
     request: NextRequest,
     { params }: { params: Params }
@@ -16,7 +16,16 @@ export async function GET(
         if (!userId) throw errors.unauthorized();
 
         const { id } = await params;
-        const entry = await getEntryById(id, userId);
+        
+        // Check if the parameter is a date (YYYY-MM-DD format)
+        const isDateFormat = /^\d{4}-\d{2}-\d{2}$/.test(id);
+        
+        let entry;
+        if (isDateFormat) {
+            entry = await getEntryByDate(userId, id);
+        } else {
+            entry = await getEntryById(id, userId);
+        }
 
         if (!entry) {
             throw errors.notFound("Entry");
@@ -24,15 +33,15 @@ export async function GET(
 
         return successResponse({
             id: entry.id,
-            entryDate: entry.entryDate,
-            rawText: entry.rawText,
-            createdAt: entry.createdAt,
-            updatedAt: entry.updatedAt,
+            entry_date: entry.entryDate,
+            raw_text: entry.rawText,
+            created_at: entry.createdAt,
+            updated_at: entry.updatedAt,
             enrichment: entry.enrichment
                 ? {
-                    aiTitle: entry.enrichment.aiTitle,
-                    aiBullets: entry.enrichment.aiBullets,
-                    aiCategory: entry.enrichment.aiCategory,
+                    ai_title: entry.enrichment.aiTitle,
+                    ai_bullets: entry.enrichment.aiBullets,
+                    ai_category: entry.enrichment.aiCategory,
                 }
                 : null,
         });
@@ -52,7 +61,16 @@ export async function PATCH(
 
         const { id } = await params;
         const body = await request.json();
-        const { rawText } = updateEntrySchema.parse(body);
+        const parsed = updateEntrySchema.safeParse(body);
+        if (parsed.success) {
+            var rawText = parsed.data.raw_text;
+        } else {
+            const legacyParsed = updateEntryLegacySchema.safeParse(body);
+            if (!legacyParsed.success) {
+                throw legacyParsed.error;
+            }
+            var rawText = legacyParsed.data.rawText;
+        }
 
         const entry = await updateEntry(id, userId, rawText);
 
@@ -62,9 +80,9 @@ export async function PATCH(
 
         return successResponse({
             id: entry.id,
-            entryDate: entry.entryDate,
-            rawText: entry.rawText,
-            updatedAt: entry.updatedAt,
+            entry_date: entry.entryDate,
+            raw_text: entry.rawText,
+            updated_at: entry.updatedAt,
         });
     } catch (error) {
         return handleApiError(error);

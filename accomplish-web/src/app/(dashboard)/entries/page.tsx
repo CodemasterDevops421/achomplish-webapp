@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -31,19 +32,20 @@ import {
     ChevronRight,
     FileText,
 } from "lucide-react";
+import posthog from "posthog-js";
 
 type Enrichment = {
-    aiTitle: string | null;
-    aiBullets: string[] | null;
-    aiCategory: string | null;
+    ai_title: string | null;
+    ai_bullets: string[] | null;
+    ai_category: string | null;
 };
 
 type Entry = {
     id: string;
-    entryDate: string;
-    rawText: string;
-    createdAt: string;
-    updatedAt: string;
+    entry_date: string;
+    raw_text: string;
+    created_at: string;
+    updated_at: string;
     enrichment: Enrichment | null;
 };
 
@@ -68,17 +70,23 @@ export default function EntriesPage() {
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [entryToDelete, setEntryToDelete] = useState<string | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [searchQuery, setSearchQuery] = useState("");
 
     // Fetch entries
-    const fetchEntries = async (page: number = 1) => {
+    const fetchEntries = async (page: number = 1, query?: string) => {
         try {
             setIsLoading(true);
-            const res = await fetch(`/api/entries?page=${page}&limit=20`);
+            const q = query?.trim() ? `&q=${encodeURIComponent(query.trim())}` : "";
+            const res = await fetch(`/api/entries?page=${page}&limit=20${q}`);
             if (!res.ok) throw new Error("Failed to load entries");
 
             const data = await res.json();
             setEntries(data.entries);
             setPagination(data.pagination);
+            posthog.capture("entries_viewed", {
+                scope: "list",
+                query: query?.trim() || null,
+            });
         } catch (error) {
             console.error("Failed to load entries:", error);
             toast.error("Failed to load entries. Please try again.");
@@ -90,6 +98,13 @@ export default function EntriesPage() {
     useEffect(() => {
         fetchEntries();
     }, []);
+
+    useEffect(() => {
+        const delay = setTimeout(() => {
+            fetchEntries(1, searchQuery);
+        }, 300);
+        return () => clearTimeout(delay);
+    }, [searchQuery]);
 
     const formatDate = (dateString: string) => {
         const date = new Date(dateString);
@@ -122,6 +137,7 @@ export default function EntriesPage() {
 
             setEntries(entries.filter((e) => e.id !== entryToDelete));
             setPagination((prev) => ({ ...prev, total: prev.total - 1 }));
+            posthog.capture("entry_deleted", { entry_id: entryToDelete });
             toast.success("Entry deleted successfully");
         } catch (error) {
             console.error("Delete error:", error);
@@ -134,7 +150,7 @@ export default function EntriesPage() {
     };
 
     const handlePageChange = (newPage: number) => {
-        fetchEntries(newPage);
+        fetchEntries(newPage, searchQuery);
     };
 
     if (isLoading) {
@@ -180,11 +196,20 @@ export default function EntriesPage() {
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-bold text-foreground">Past Entries</h1>
-                <span className="text-sm text-muted-foreground">
-                    {pagination.total} {pagination.total === 1 ? "entry" : "entries"}
-                </span>
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                    <h1 className="text-2xl font-bold text-foreground">Past Entries</h1>
+                    <p className="text-sm text-muted-foreground">
+                        {pagination.total} {pagination.total === 1 ? "entry" : "entries"}
+                    </p>
+                </div>
+                <div className="w-full md:w-64">
+                    <Input
+                        placeholder="Search entries..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                </div>
             </div>
 
             {/* Entries List */}
@@ -200,15 +225,15 @@ export default function EntriesPage() {
                                 <div className="flex items-center gap-3">
                                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                         <Calendar className="w-4 h-4" />
-                                        {formatDate(entry.entryDate)}
+                                        {formatDate(entry.entry_date)}
                                     </div>
                                     {entry.enrichment && (
-                                        <Badge variant="secondary" className="text-xs">
-                                            <Sparkles className="w-3 h-3 mr-1" />
-                                            AI Enhanced
-                                        </Badge>
-                                    )}
-                                </div>
+                                                <Badge variant="secondary" className="text-xs">
+                                                    <Sparkles className="w-3 h-3 mr-1" />
+                                                    AI Enhanced
+                                                </Badge>
+                                            )}
+                                        </div>
 
                                 <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
@@ -226,7 +251,7 @@ export default function EntriesPage() {
                                             className="cursor-pointer"
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                router.push(`/dashboard?date=${entry.entryDate}`);
+                                                router.push(`/dashboard?date=${entry.entry_date}`);
                                             }}
                                         >
                                             <Edit2 className="w-4 h-4 mr-2" />
@@ -248,20 +273,20 @@ export default function EntriesPage() {
                             </div>
 
                             {/* Entry Title (if AI enhanced) */}
-                            {entry.enrichment?.aiTitle && (
+                            {entry.enrichment?.ai_title && (
                                 <h3 className="text-lg font-semibold text-foreground mb-2">
-                                    {entry.enrichment.aiTitle}
+                                    {entry.enrichment.ai_title}
                                 </h3>
                             )}
 
                             {/* Entry Content */}
                             <p className="text-foreground leading-relaxed">
                                 {expandedId === entry.id
-                                    ? entry.rawText
-                                    : truncateText(entry.rawText)}
+                                    ? entry.raw_text
+                                    : truncateText(entry.raw_text, 100)}
                             </p>
 
-                            {entry.rawText.length > 150 && (
+                            {entry.raw_text.length > 100 && (
                                 <button
                                     className="text-sm text-primary hover:text-primary/80 mt-2 font-medium cursor-pointer"
                                     onClick={(e) => {
@@ -274,10 +299,10 @@ export default function EntriesPage() {
                             )}
 
                             {/* Category Badge */}
-                            {entry.enrichment?.aiCategory && (
+                            {entry.enrichment?.ai_category && (
                                 <div className="mt-4">
                                     <Badge variant="outline" className="text-xs">
-                                        {entry.enrichment.aiCategory}
+                                        {entry.enrichment.ai_category}
                                     </Badge>
                                 </div>
                             )}

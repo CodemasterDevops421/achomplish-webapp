@@ -14,12 +14,13 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { Bell, Clock, Globe, Save } from "lucide-react";
+import posthog from "posthog-js";
 
 type Settings = {
-    emailRemindersEnabled: boolean;
-    reminderTime: string;
-    reminderTimezone: string;
-    skipWeekends: boolean;
+    email_reminders_enabled: boolean;
+    reminder_time: string;
+    reminder_timezone: string;
+    skip_weekends: boolean;
 };
 
 const TIMEZONES = [
@@ -39,10 +40,10 @@ const TIMEZONES = [
 
 export default function SettingsPage() {
     const [settings, setSettings] = useState<Settings>({
-        emailRemindersEnabled: true,
-        reminderTime: "18:30",
-        reminderTimezone: "UTC",
-        skipWeekends: true,
+        email_reminders_enabled: true,
+        reminder_time: "18:30",
+        reminder_timezone: "UTC",
+        skip_weekends: true,
     });
     const [originalSettings, setOriginalSettings] = useState<Settings | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -57,8 +58,13 @@ export default function SettingsPage() {
                 if (!res.ok) throw new Error("Failed to load settings");
 
                 const data = await res.json();
-                setSettings(data);
-                setOriginalSettings(data);
+                const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                const resolved = {
+                    ...data,
+                    reminder_timezone: data.reminder_timezone || localTz || "UTC",
+                };
+                setSettings(resolved);
+                setOriginalSettings(resolved);
             } catch (error) {
                 console.error("Failed to load settings:", error);
                 toast.error("Failed to load settings");
@@ -74,10 +80,10 @@ export default function SettingsPage() {
     useEffect(() => {
         if (!originalSettings) return;
         const changed =
-            settings.emailRemindersEnabled !== originalSettings.emailRemindersEnabled ||
-            settings.reminderTime !== originalSettings.reminderTime ||
-            settings.reminderTimezone !== originalSettings.reminderTimezone ||
-            settings.skipWeekends !== originalSettings.skipWeekends;
+            settings.email_reminders_enabled !== originalSettings.email_reminders_enabled ||
+            settings.reminder_time !== originalSettings.reminder_time ||
+            settings.reminder_timezone !== originalSettings.reminder_timezone ||
+            settings.skip_weekends !== originalSettings.skip_weekends;
         setHasChanges(changed);
     }, [settings, originalSettings]);
 
@@ -99,6 +105,10 @@ export default function SettingsPage() {
             setSettings(data);
             setOriginalSettings(data);
             setHasChanges(false);
+            posthog.capture("settings_updated", {
+                email_reminders_enabled: data.email_reminders_enabled,
+                reminder_timezone: data.reminder_timezone,
+            });
             toast.success("Settings saved successfully!");
         } catch (error) {
             console.error("Save error:", error);
@@ -107,6 +117,10 @@ export default function SettingsPage() {
             setIsSaving(false);
         }
     };
+
+    useEffect(() => {
+        posthog.capture("settings_viewed");
+    }, []);
 
     if (isLoading) {
         return (
@@ -161,17 +175,17 @@ export default function SettingsPage() {
                             </p>
                         </div>
                         <Button
-                            variant={settings.emailRemindersEnabled ? "default" : "outline"}
+                            variant={settings.email_reminders_enabled ? "default" : "outline"}
                             size="sm"
                             onClick={() =>
                                 setSettings({
                                     ...settings,
-                                    emailRemindersEnabled: !settings.emailRemindersEnabled,
+                                    email_reminders_enabled: !settings.email_reminders_enabled,
                                 })
                             }
                             className="cursor-pointer"
                         >
-                            {settings.emailRemindersEnabled ? "Enabled" : "Disabled"}
+                            {settings.email_reminders_enabled ? "Enabled" : "Disabled"}
                         </Button>
                     </div>
 
@@ -190,12 +204,12 @@ export default function SettingsPage() {
                         </div>
                         <Input
                             type="time"
-                            value={settings.reminderTime}
+                            value={settings.reminder_time}
                             onChange={(e) =>
-                                setSettings({ ...settings, reminderTime: e.target.value })
+                                setSettings({ ...settings, reminder_time: e.target.value })
                             }
                             className="w-32"
-                            disabled={!settings.emailRemindersEnabled}
+                            disabled={!settings.email_reminders_enabled}
                         />
                     </div>
 
@@ -213,12 +227,12 @@ export default function SettingsPage() {
                             </div>
                         </div>
                         <select
-                            value={settings.reminderTimezone}
+                            value={settings.reminder_timezone}
                             onChange={(e) =>
-                                setSettings({ ...settings, reminderTimezone: e.target.value })
+                                setSettings({ ...settings, reminder_timezone: e.target.value })
                             }
                             className="px-3 py-2 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer"
-                            disabled={!settings.emailRemindersEnabled}
+                            disabled={!settings.email_reminders_enabled}
                         >
                             {TIMEZONES.map((tz) => (
                                 <option key={tz.value} value={tz.value}>
@@ -239,15 +253,15 @@ export default function SettingsPage() {
                             </p>
                         </div>
                         <Button
-                            variant={settings.skipWeekends ? "default" : "outline"}
+                            variant={settings.skip_weekends ? "default" : "outline"}
                             size="sm"
                             onClick={() =>
-                                setSettings({ ...settings, skipWeekends: !settings.skipWeekends })
+                                setSettings({ ...settings, skip_weekends: !settings.skip_weekends })
                             }
                             className="cursor-pointer"
-                            disabled={!settings.emailRemindersEnabled}
+                            disabled={!settings.email_reminders_enabled}
                         >
-                            {settings.skipWeekends ? "Yes" : "No"}
+                            {settings.skip_weekends ? "Yes" : "No"}
                         </Button>
                     </div>
                 </CardContent>
