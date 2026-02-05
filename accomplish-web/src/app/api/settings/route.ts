@@ -87,9 +87,25 @@ export async function PATCH(request: NextRequest) {
             .where(eq(userSettings.userId, userId))
             .limit(1);
 
+        const updateSet = {
+            ...(updates.emailRemindersEnabled !== undefined
+                ? { emailRemindersEnabled: updates.emailRemindersEnabled }
+                : {}),
+            ...(updates.reminderTime !== undefined
+                ? { reminderTime: updates.reminderTime }
+                : {}),
+            ...(updates.reminderTimezone !== undefined
+                ? { reminderTimezone: normalizeTimezone(updates.reminderTimezone) }
+                : {}),
+            ...(updates.skipWeekends !== undefined
+                ? { skipWeekends: updates.skipWeekends }
+                : {}),
+            updatedAt: new Date(),
+        };
+
         let settings;
         if (existing.length === 0) {
-            // Create new settings
+            // Create new settings, but apply PATCH updates even if a concurrent insert happens.
             const created = await db
                 .insert(userSettings)
                 .values({
@@ -99,40 +115,17 @@ export async function PATCH(request: NextRequest) {
                     reminderTimezone: normalizeTimezone(updates.reminderTimezone ?? safeTz),
                     skipWeekends: updates.skipWeekends ?? true,
                 })
-                .onConflictDoNothing({ target: userSettings.userId })
+                .onConflictDoUpdate({
+                    target: userSettings.userId,
+                    set: updateSet,
+                })
                 .returning();
-            if (created.length) {
-                settings = created[0];
-            } else {
-                const existing = await db
-                    .select()
-                    .from(userSettings)
-                    .where(eq(userSettings.userId, userId))
-                    .limit(1);
-                if (!existing.length) {
-                    throw errors.internal("Failed to create user settings");
-                }
-                settings = existing[0];
-            }
+            settings = created[0];
         } else {
             // Update existing settings
             const updated = await db
                 .update(userSettings)
-                .set({
-                    ...(updates.emailRemindersEnabled !== undefined
-                        ? { emailRemindersEnabled: updates.emailRemindersEnabled }
-                        : {}),
-                    ...(updates.reminderTime !== undefined
-                        ? { reminderTime: updates.reminderTime }
-                        : {}),
-                    ...(updates.reminderTimezone !== undefined
-                        ? { reminderTimezone: updates.reminderTimezone }
-                        : {}),
-                    ...(updates.skipWeekends !== undefined
-                        ? { skipWeekends: updates.skipWeekends }
-                        : {}),
-                    updatedAt: new Date(),
-                })
+                .set(updateSet)
                 .where(eq(userSettings.userId, userId))
                 .returning();
             settings = updated[0];
