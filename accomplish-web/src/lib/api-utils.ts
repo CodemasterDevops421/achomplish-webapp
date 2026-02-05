@@ -85,7 +85,7 @@ export const errors = {
         new ApiError(403, "FORBIDDEN", "Access denied"),
 
     badRequest: (message: string) =>
-        new ApiError(400, "BAD_REQUEST", message),
+        new ApiError(400, "VALIDATION_ERROR", message),
 
     conflict: (message: string) =>
         new ApiError(409, "CONFLICT", message),
@@ -95,4 +95,7 @@ export const errors = {
 
     timeout: (service: string) =>
         new ApiError(504, "TIMEOUT", `${service} timed out`),
+
+    internal: (message: string) =>
+        new ApiError(500, "INTERNAL_ERROR", message),
 };

@@ -17,8 +17,33 @@ export default clerkMiddleware(async (auth, request) => {
         await auth.protect();
     }
 
-    // Basic CSRF protection for API mutations
+    // Handle CORS preflight for API routes
     const isApiRoute = request.nextUrl.pathname.startsWith("/api/");
+    const requestOrigin = request.headers.get("origin");
+    const configuredOrigins = (process.env.CORS_ALLOWED_ORIGINS || "")
+        .split(",")
+        .map((origin) => origin.trim())
+        .filter(Boolean);
+    const defaultOrigin = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin;
+    const allowedOrigins = configuredOrigins.length > 0 ? configuredOrigins : [defaultOrigin];
+    const isAllowedOrigin = !!requestOrigin && allowedOrigins.includes(requestOrigin);
+    if (isApiRoute && request.method === "OPTIONS") {
+        if (!isAllowedOrigin) {
+            return NextResponse.json(
+                { error: "CORS origin not allowed", code: "FORBIDDEN" },
+                { status: 403 }
+            );
+        }
+        const preflight = new NextResponse(null, { status: 204 });
+        preflight.headers.set("Access-Control-Allow-Origin", requestOrigin);
+        preflight.headers.set("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
+        preflight.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        preflight.headers.set("Access-Control-Allow-Credentials", "true");
+        preflight.headers.set("Vary", "Origin");
+        return preflight;
+    }
+
+    // Basic CSRF protection for API mutations
     const isMutation = ["POST", "PATCH", "DELETE", "PUT"].includes(request.method);
     const isCronRoute = request.nextUrl.pathname.startsWith("/api/cron/");
     if (isApiRoute && isMutation && !isCronRoute) {
@@ -33,6 +58,13 @@ export default clerkMiddleware(async (auth, request) => {
 
     // Add security headers
     const response = NextResponse.next();
+    if (isApiRoute && isAllowedOrigin) {
+        response.headers.set("Access-Control-Allow-Origin", requestOrigin);
+        response.headers.set("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
+        response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        response.headers.set("Access-Control-Allow-Credentials", "true");
+        response.headers.set("Vary", "Origin");
+    }
     response.headers.set('X-Frame-Options', 'DENY');
     response.headers.set('X-Content-Type-Options', 'nosniff');
     response.headers.set('X-XSS-Protection', '1; mode=block');

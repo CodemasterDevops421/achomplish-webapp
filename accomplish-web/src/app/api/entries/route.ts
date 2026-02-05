@@ -55,25 +55,46 @@ export async function POST(request: NextRequest) {
         if (!userId) throw errors.unauthorized();
 
         const body = await request.json();
+        let rawText: string;
+        let entryDate: string | undefined;
         const parsed = createEntrySchema.safeParse(body);
         if (parsed.success) {
-            var rawText = parsed.data.raw_text;
-            var entryDate = parsed.data.entry_date;
+            rawText = parsed.data.raw_text;
+            entryDate = parsed.data.entry_date;
         } else {
             const legacyParsed = createEntryLegacySchema.safeParse(body);
             if (!legacyParsed.success) {
                 throw legacyParsed.error;
             }
-            var rawText = legacyParsed.data.rawText;
-            var entryDate = legacyParsed.data.entryDate;
+            rawText = legacyParsed.data.rawText;
+            entryDate = legacyParsed.data.entryDate;
         }
+
+        const requestedTz =
+            request.headers.get("x-user-timezone") ||
+            request.headers.get("x-vercel-ip-timezone") ||
+            "UTC";
 
         const settings = await db
             .select()
             .from(userSettings)
             .where(eq(userSettings.userId, userId))
             .limit(1);
-        const timezone = settings[0]?.reminderTimezone || "UTC";
+
+        let timezone = settings[0]?.reminderTimezone;
+        if (!timezone) {
+            const created = await db
+                .insert(userSettings)
+                .values({
+                    userId,
+                    emailRemindersEnabled: true,
+                    reminderTime: "18:30",
+                    reminderTimezone: requestedTz,
+                    skipWeekends: true,
+                })
+                .returning();
+            timezone = created[0].reminderTimezone;
+        }
         const today = getTodayDate(timezone);
         if (entryDate && entryDate !== today) {
             throw errors.badRequest("Entries can only be created or updated for today.");

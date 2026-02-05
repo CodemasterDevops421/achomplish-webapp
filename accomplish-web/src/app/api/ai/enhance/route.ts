@@ -1,16 +1,9 @@
 import { NextRequest } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import OpenAI from "openai";
-import { handleApiError, successResponse, errors } from "@/lib/api-utils";
+import { handleApiError, successResponse, errors, ApiError } from "@/lib/api-utils";
 import { aiEnhancementResponseSchema, enhanceEntryLegacySchema, enhanceEntrySchema } from "@/lib/validations";
 import { checkRateLimit, cleanupRateLimits, getEntryById, saveEnrichment } from "@/lib/db/queries";
-
-const AI_TIMEOUT = Number(process.env.OPENAI_TIMEOUT_S || 10) * 1000;
-
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-    timeout: AI_TIMEOUT,
-});
+import { getEnhancementJson } from "@/lib/ai/providers";
 
 // POST /api/ai/enhance - Enhance an entry with AI
 export async function POST(request: NextRequest) {
@@ -19,15 +12,16 @@ export async function POST(request: NextRequest) {
         if (!userId) throw errors.unauthorized();
 
         const body = await request.json();
+        let entryId: string;
         const parsed = enhanceEntrySchema.safeParse(body);
         if (parsed.success) {
-            var entryId = parsed.data.entry_id;
+            entryId = parsed.data.entry_id;
         } else {
             const legacyParsed = enhanceEntryLegacySchema.safeParse(body);
             if (!legacyParsed.success) {
                 throw legacyParsed.error;
             }
-            var entryId = legacyParsed.data.entryId;
+            entryId = legacyParsed.data.entryId;
         }
 
         const rate = await checkRateLimit(userId, "ai_enhance", 10, 60);
@@ -41,42 +35,14 @@ export async function POST(request: NextRequest) {
             throw errors.notFound("Entry");
         }
 
-        // Check if API key is configured
-        if (!process.env.OPENAI_API_KEY) {
-            throw errors.badRequest("AI service not configured. Please add OPENAI_API_KEY.");
-        }
-
-        const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-
         let response;
         try {
-            response = await openai.chat.completions.create({
-                model,
-                max_tokens: 500,
-                messages: [
-                    {
-                        role: "system",
-                        content: `You are a professional work accomplishment summarizer. Given a work log entry, create:
-1. A concise title (max 60 chars)
-2. 2-3 bullet points highlighting key accomplishments with impact
-3. A category (one of: Development, Documentation, Leadership, Operations, Design, Research, Communication, Other)
-
-Respond in JSON format only:
-{
-  "title": "...",
-  "bullets": ["...", "..."],
-  "category": "..."
-}`,
-                    },
-                    {
-                        role: "user",
-                        content: entry.rawText,
-                    },
-                ],
-                response_format: { type: "json_object" },
-            });
+            response = await getEnhancementJson(entry.rawText);
         } catch (aiError) {
             await cleanupRateLimits(86400);
+            if (aiError instanceof ApiError) {
+                throw aiError;
+            }
             return Response.json(
                 { error: "AI enhancement timed out", code: "TIMEOUT", fallback: true },
                 { status: 504 }
@@ -84,12 +50,7 @@ Respond in JSON format only:
         }
 
         // Parse AI response
-        const content = response.choices[0]?.message?.content;
-        if (!content) {
-            throw errors.badRequest("AI returned empty response");
-        }
-
-        const parsedResult = aiEnhancementResponseSchema.safeParse(JSON.parse(content));
+        const parsedResult = aiEnhancementResponseSchema.safeParse(JSON.parse(response.json));
         if (!parsedResult.success) {
             throw errors.badRequest("AI returned invalid response format");
         }
@@ -97,8 +58,8 @@ Respond in JSON format only:
 
         // Save enrichment
         const enrichment = await saveEnrichment(entryId, {
-            aiProvider: "openai",
-            aiModel: model,
+            aiProvider: response.provider,
+            aiModel: response.model,
             aiTitle: aiResult.title,
             aiBullets: aiResult.bullets,
             aiCategory: aiResult.category,

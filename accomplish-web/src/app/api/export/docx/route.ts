@@ -8,6 +8,8 @@ type ExportPayload = {
     filename?: string;
 };
 
+const MAX_EXPORT_CHARS = 50000;
+
 function buildDoc(content: string): Document {
     const lines = content.split(/\r?\n/);
     const paragraphs: Paragraph[] = [];
@@ -64,6 +66,9 @@ export async function POST(request: NextRequest) {
         const body = (await request.json()) as ExportPayload;
         if (!body?.content) {
             throw errors.badRequest("Missing content");
+        }
+        if (body.content.length > MAX_EXPORT_CHARS) {
+            throw errors.badRequest("Content too large for export");
         }
 
         const doc = buildDoc(body.content);

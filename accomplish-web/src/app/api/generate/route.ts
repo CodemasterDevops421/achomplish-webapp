@@ -11,17 +11,19 @@ export async function POST(request: NextRequest) {
         if (!userId) throw errors.unauthorized();
 
         const body = await request.json();
+        let rangeStart: string;
+        let rangeEnd: string;
         const parsed = generateOutputSchema.safeParse(body);
         if (parsed.success) {
-            var rangeStart = parsed.data.range_start;
-            var rangeEnd = parsed.data.range_end;
+            rangeStart = parsed.data.range_start;
+            rangeEnd = parsed.data.range_end;
         } else {
             const legacyParsed = generateOutputLegacySchema.safeParse(body);
             if (!legacyParsed.success) {
                 throw legacyParsed.error;
             }
-            var rangeStart = legacyParsed.data.rangeStart;
-            var rangeEnd = legacyParsed.data.rangeEnd;
+            rangeStart = legacyParsed.data.rangeStart;
+            rangeEnd = legacyParsed.data.rangeEnd;
         }
 
         const type = body.type as "review" | "resume" | undefined;

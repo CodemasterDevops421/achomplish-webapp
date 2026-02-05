@@ -186,7 +186,7 @@ export default function EntriesPage() {
                             onClick={() => router.push("/dashboard")}
                             className="bg-[var(--cta)] hover:bg-[var(--cta)]/90 text-white cursor-pointer"
                         >
-                            Log Today's Entry
+                            Log Today&apos;s Entry
                         </Button>
                     </CardContent>
                 </Card>

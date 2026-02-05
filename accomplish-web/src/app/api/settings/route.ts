@@ -6,10 +6,15 @@ import { db, userSettings } from "@/lib/db";
 import { eq } from "drizzle-orm";
 
 // GET /api/settings - Get user settings
-export async function GET() {
+export async function GET(request: NextRequest) {
     try {
         const { userId } = await auth();
         if (!userId) throw errors.unauthorized();
+
+        const requestedTz =
+            request.headers.get("x-user-timezone") ||
+            request.headers.get("x-vercel-ip-timezone") ||
+            "UTC";
 
         const result = await db
             .select()
@@ -18,11 +23,11 @@ export async function GET() {
             .limit(1);
 
         if (result.length === 0) {
-            // Return defaults if no settings exist
+            // Return defaults if no settings exist (do not write on GET)
             return successResponse({
                 email_reminders_enabled: true,
                 reminder_time: "18:30",
-                reminder_timezone: "UTC",
+                reminder_timezone: requestedTz,
                 skip_weekends: true,
             });
         }
@@ -46,6 +51,10 @@ export async function PATCH(request: NextRequest) {
         if (!userId) throw errors.unauthorized();
 
         const body = await request.json();
+        const requestedTz =
+            request.headers.get("x-user-timezone") ||
+            request.headers.get("x-vercel-ip-timezone") ||
+            "UTC";
         const parsed = updateSettingsSchema.safeParse(body);
         let updates: {
             emailRemindersEnabled?: boolean;
@@ -84,7 +93,7 @@ export async function PATCH(request: NextRequest) {
                     userId,
                     emailRemindersEnabled: updates.emailRemindersEnabled ?? true,
                     reminderTime: updates.reminderTime ?? "18:30",
-                    reminderTimezone: updates.reminderTimezone ?? "UTC",
+                    reminderTimezone: updates.reminderTimezone ?? requestedTz,
                     skipWeekends: updates.skipWeekends ?? true,
                 })
                 .returning();
