@@ -24,16 +24,15 @@ export default function LandingPage() {
               <span className="hidden md:inline-flex landing-chip px-3 py-1 rounded-full text-xs font-semibold">
                 Daily wins, distilled
               </span>
-              <Link href="/sign-in">
-                <Button variant="ghost" className="cursor-pointer">
-                  Sign In
-                </Button>
-              </Link>
-              <Link href="/sign-up">
-                <Button className="bg-[var(--cta)] hover:bg-[var(--cta)]/90 text-white cursor-pointer">
-                  Start Free
-                </Button>
-              </Link>
+              <Button asChild variant="ghost" className="cursor-pointer">
+                <Link href="/sign-in">Sign In</Link>
+              </Button>
+              <Button
+                asChild
+                className="bg-[var(--cta)] hover:bg-[var(--cta)]/90 text-white cursor-pointer"
+              >
+                <Link href="/sign-up">Start Free</Link>
+              </Button>
             </div>
           </div>
         </div>
@@ -59,24 +58,24 @@ export default function LandingPage() {
             </div>
 
             <div className="flex flex-col sm:flex-row gap-4">
-              <Link href="/sign-up" className="landing-glow">
-                <Button
-                  size="lg"
-                  className="bg-[var(--cta)] hover:bg-[var(--cta)]/90 text-white text-lg px-8 py-6 rounded-2xl shadow-lg cursor-pointer"
-                >
+              <Button
+                asChild
+                size="lg"
+                className="landing-glow bg-[var(--cta)] hover:bg-[var(--cta)]/90 text-white text-lg px-8 py-6 rounded-2xl shadow-lg cursor-pointer"
+              >
+                <Link href="/sign-up">
                   Start Logging Today
                   <ArrowRight className="w-5 h-5 ml-2" />
-                </Button>
-              </Link>
-              <Link href="/sign-in">
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="rounded-2xl px-8 py-6 border-primary/30 text-primary hover:text-primary cursor-pointer"
-                >
-                  I already have an account
-                </Button>
-              </Link>
+                </Link>
+              </Button>
+              <Button
+                asChild
+                size="lg"
+                variant="outline"
+                className="rounded-2xl px-8 py-6 border-primary/30 text-primary hover:text-primary cursor-pointer"
+              >
+                <Link href="/sign-in">I already have an account</Link>
+              </Button>
             </div>
 
             <div className="flex flex-wrap gap-6 text-sm text-muted-foreground">
@@ -184,16 +183,19 @@ export default function LandingPage() {
               No more backfilling from memory.
             </p>
             <div className="flex flex-col sm:flex-row gap-3">
-              <Link href="/sign-up">
-                <Button className="bg-[var(--cta)] hover:bg-[var(--cta)]/90 text-white cursor-pointer">
-                  Start Free
-                </Button>
-              </Link>
-              <Link href="/entries">
-                <Button variant="outline" className="border-primary/30 text-primary cursor-pointer">
-                  See sample entries
-                </Button>
-              </Link>
+              <Button
+                asChild
+                className="bg-[var(--cta)] hover:bg-[var(--cta)]/90 text-white cursor-pointer"
+              >
+                <Link href="/sign-up">Start Free</Link>
+              </Button>
+              <Button
+                asChild
+                variant="outline"
+                className="border-primary/30 text-primary cursor-pointer"
+              >
+                <Link href="/entries">See sample entries</Link>
+              </Button>
             </div>
           </div>
         </section>
